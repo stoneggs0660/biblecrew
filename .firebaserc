@@ -1,0 +1,7 @@
+{
+  "projects": {
+    "default": "biblecrew-dev",
+    "dev": "biblecrew-dev",
+    "prod": "biblecrew-e14f3"
+  }
+}
