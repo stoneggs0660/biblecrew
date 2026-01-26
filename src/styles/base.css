@@ -1,0 +1,56 @@
+html, body {
+  margin: 0;
+  padding: 0;
+  width: 100%;
+  max-width: 100%;
+  overflow-x: hidden;
+  box-sizing: border-box;
+}
+
+/* 루트 컨테이너가 화면을 넘지 않도록 고정 */
+#root {
+  width: 100%;
+  max-width: 100%;
+  overflow-x: hidden;
+}
+
+/* 전체 요소 박스 모델 통일 */
+*, *::before, *::after {
+  box-sizing: border-box;
+}
+
+
+/* === 요청사항 반영 === */
+.month-progress-label { font-size:15px; }
+.month-progress-main { font-size:22px; font-weight:800; }
+.month-progress-sub { font-size:14px; color:#666; }
+
+.comment-item { padding:6px 10px; margin-bottom:4px; }
+
+.crew-status-table {
+  width:100%;
+  border-collapse:collapse;
+  margin-top:10px;
+}
+.crew-status-table th,
+.crew-status-table td {
+  padding:8px;
+  border-bottom:1px solid #eee;
+  text-align:center;
+}
+
+.medal-wrapper { position:relative; width:26px; margin:auto; }
+.medal-icon { width:100%; display:flex; align-items:center; justify-content:center; }
+.medal-count {
+  position:absolute;
+  right:-6px;
+  bottom:-6px;
+  background:#0A6B42;
+  color:#fff;
+  font-size:11px;
+  font-weight:700;
+  border-radius:50%;
+  padding:2px 5px;
+}
+.fail { color:#D32F2F; font-weight:700; }
+.success { color:#0A6B42; font-weight:700; }

@@ -1,0 +1,1 @@
+export default function BeginnerCrew(){return <div>BeginnerCrew</div>;}

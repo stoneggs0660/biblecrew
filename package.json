@@ -1,0 +1,24 @@
+{
+  "name": "biblecrew-v06-ui2",
+  "version": "1.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "build:dev": "vite build --mode development",
+    "build:prod": "vite build --mode production",
+    "deploy:dev": "npm run build:dev && firebase deploy --project dev --only hosting",
+    "deploy:prod": "npm run build:prod && firebase deploy --project prod --only hosting",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "react": "^18.2.0",
+    "react-dom": "^18.2.0",
+    "react-router-dom": "^6.23.0",
+    "firebase": "^10.7.1"
+  },
+  "devDependencies": {
+    "vite": "^4.4.9",
+    "@vitejs/plugin-react": "^4.0.3"
+  }
+}
