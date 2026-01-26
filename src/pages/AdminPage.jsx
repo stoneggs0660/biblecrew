@@ -120,46 +120,56 @@ export default function AdminPage() {
     crewNames.forEach((c) => {
       status[c] = [];
     });
-    (crews && Object.entries(crews)).forEach(([crew, crewNode]) => {
-      const usersNode = crewNode && crewNode.users;
-      if (!usersNode) return;
-      Object.entries(usersNode).forEach(([uid, u]) => {
-        const checks = (u && u.checks) || {};
-        let readChapters = 0;
-        let requiredChapters = 0;
-        let allCovered = true;
-        uptoDates.forEach((d) => {
-          const portion = portionByCrewAndDate[crew] && portionByCrewAndDate[crew][d];
-          if (portion && typeof portion.chapters === 'number') {
-            requiredChapters += portion.chapters;
-            if (checks[d]) {
-              readChapters += portion.chapters;
-            } else {
-              allCovered = false;
+
+    if (crews && typeof crews === 'object') {
+      Object.entries(crews).forEach(([crew, crewNode]) => {
+        const usersNode = crewNode && crewNode.users;
+        if (!usersNode) return;
+        
+        // 만약 status객체에 해당 crew 키가 없다면(커스텀 키 등) 건너뜀
+        if (!status[crew]) return;
+
+        Object.entries(usersNode).forEach(([uid, u]) => {
+          const checks = (u && u.checks) || {};
+          let readChapters = 0;
+          let requiredChapters = 0;
+          
+          uptoDates.forEach((d) => {
+            const portion = portionByCrewAndDate[crew] && portionByCrewAndDate[crew][d];
+            if (portion && typeof portion.chapters === 'number') {
+              requiredChapters += portion.chapters;
+              if (checks[d]) {
+                readChapters += portion.chapters;
+              }
             }
-          }
-        });
-        const info = users && users[uid] ? users[uid] : {};
-        const name = info.name || uid;
-        const progress = requiredChapters > 0 ? Math.round((readChapters / requiredChapters) * 100) : 0;
-        const state = getTodayCrewState({
-          dates,
-          todayKey,
-          userChecks: checks,
-          userDailyActivity: info.dailyActivity || {},
-        });
-        status[crew].push({
-          uid,
-          name,
-          chapters: readChapters,
-          progress,
-          stateKey: state.key,
-          stateLabel: state.label,
+          });
+
+          const info = (users && users[uid]) ? users[uid] : {};
+          const name = info.name || uid;
+          const progress = requiredChapters > 0 ? Math.round((readChapters / requiredChapters) * 100) : 0;
+          const state = getTodayCrewState({
+            dates,
+            todayKey,
+            userChecks: checks,
+            userDailyActivity: info.dailyActivity || {},
+          });
+
+          status[crew].push({
+            uid,
+            name,
+            chapters: readChapters,
+            progress,
+            stateKey: state.key,
+            stateLabel: state.label,
+          });
         });
       });
-    });
+    }
+
     Object.keys(status).forEach((crew) => {
-      status[crew].sort((a, b) => b.chapters - a.chapters);
+      if (Array.isArray(status[crew])) {
+        status[crew].sort((a, b) => (b.chapters || 0) - (a.chapters || 0));
+      }
     });
     setCrewStatus(status);
   }, [crews, users]);
@@ -279,7 +289,7 @@ export default function AdminPage() {
     const unsubs = [];
     crewsForApproval.forEach((crew) => {
       const unsub = subscribeToCrewApprovals(crew, ymKey, (data) => {
-        const names = data ? Object.keys(data) : [];
+        const names = (data && typeof data === 'object') ? Object.keys(data) : [];
         setApprovalLists((prev) => ({
           ...prev,
           [crew]: names,
