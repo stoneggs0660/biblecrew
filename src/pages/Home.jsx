@@ -157,34 +157,22 @@ export default function Home({ user }) {
           🏃 중급반(30)
         </button>
         <button
-          style={btnStyle('#1B9C5A')}
+          style={btnStyle('#136F63')}
           onClick={() => navigate('/초급반구약A')}
         >
           🏃 구약초급A(15)
         </button>
         <button
-          style={btnStyle('#1B9C5A')}
+          style={btnStyle('#136F63')}
           onClick={() => navigate('/초급반구약B')}
         >
           🏃 구약초급B(15)
         </button>
         <button
-          style={btnStyle('#1B9C5A')}
+          style={btnStyle('#136F63')}
           onClick={() => navigate('/초급반신약')}
         >
           🏃 신약초급반(9)
-        </button>
-        <button
-          style={btnStyle('#0F3455')}
-          onClick={() => navigate('/구약파노라마')}
-        >
-          🏃 구약파노라마(9)
-        </button>
-        <button
-          style={btnStyle('#0F3455')}
-          onClick={() => navigate('/신약파노라마')}
-        >
-          🏃 신약파노라마(5)
         </button>
         <button
           style={btnStyle('#FF9F1C')}
@@ -193,13 +181,25 @@ export default function Home({ user }) {
           🏅 명예의 전당
         </button>
         <button
-          style={btnStyle('#136F63')}
+          style={btnStyle('#0B4F6C')}
+          onClick={() => navigate('/신약파노라마')}
+        >
+          🏃 신약파노라마(5)
+        </button>
+        <button
+          style={btnStyle('#0B4F6C')}
+          onClick={() => navigate('/구약파노라마')}
+        >
+          🏃 구약파노라마(9)
+        </button>
+        <button
+          style={btnStyle('#0F3455')}
           onClick={() => navigate('/records')}>
 
           👤 내 기록
         </button>
         <button
-          style={btnStyle('#136F63')}
+          style={btnStyle('#0F3455')}
           onClick={() => navigate('/admin-login')}
         >
           ⚙️ 관리자 모드
