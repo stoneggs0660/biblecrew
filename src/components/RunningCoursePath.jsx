@@ -1,5 +1,7 @@
 import React, { useMemo } from 'react';
 import { getAbbreviation } from '../utils/bibleUtils';
+import { BIBLE_TITLES } from '../utils/bibleTitles';
+import { BIBLE_CATEGORIES, CATEGORY_DESCRIPTIONS } from '../utils/bibleThemes';
 
 export default function RunningCoursePath({
     todayPortion,
@@ -122,48 +124,41 @@ export default function RunningCoursePath({
                     break;
                 }
             }
-            // 여러 장인 경우 쉼표(,)를 붙여서 구분 (마지막 줄 제외)
-            // 같은 책 이름이 연속될 경우:
-            // 1. 단일 장(예: "단 1", "단 3")은 한 줄로 병합 ("단 1, 3")
-            // 2. 다른 책이라도 단일 장이면 쉼표로 연결 ("요이 1, 요삼 1")
-            // 3. 범위(예: "창 38-39")가 포함되면 줄바꿈 ("창 38-39\n창 40-41")
+
+            // ✅ 누적 장수 계산
+            let cumulativeCount = 0;
+
             const baseSections = merged.map(s => {
+                cumulativeCount += s.count;
+
                 const formattedRef = s.abbreviations.reduce((acc, curr, i) => {
-                    // 줄바꿈 방지 공백(NBSP) 적용: "요삼 1" -> "요삼\u00A01"
                     const safeCurr = curr.replace(/\s+/g, '\u00A0');
-
                     if (i === 0) return safeCurr;
-
                     const prev = s.abbreviations[i - 1];
                     const isPrevRange = prev.includes('-');
-                    const isCurrRange = curr.includes('-'); // - (hyphen) check
-
+                    const isCurrRange = curr.includes('-');
                     const prevMatch = prev.match(/^([^\d]+)\s*\d+/);
                     const currMatch = curr.match(/^([^\d]+)\s*\d+/);
                     const sameBook = (prevMatch && currMatch && prevMatch[1] === currMatch[1]);
 
                     if (sameBook && !isPrevRange && !isCurrRange) {
-                        // 단일 장끼리는 병합 (책 이름 생략, 쉼표 연결)
-                        // Note: Replace might fail if we already NBSP'd. 
-                        // Safe strategy: Remove book from RAW string, THEN add NBSP.
                         const rawText = curr.replace(currMatch[1], '').trim();
-                        return `${acc}, ${rawText.replace(/\s+/g, '\u00A0')}`; // Numbers usually don't have space, but just in case
+                        return `${acc}, ${rawText.replace(/\s+/g, '\u00A0')}`;
                     } else if (prevMatch && currMatch && prevMatch[1] === '요이' && currMatch[1] === '요삼') {
-                        // 요한2서와 요한3서는 한 줄에 표시 ("요이 1, 요삼 1")
                         return `${acc}, ${safeCurr}`;
                     } else {
-                        // 범위가 포함되거나 다른 책이면 줄바꿈 (책 이름 유지)
                         return `${acc}\n${safeCurr}`;
                     }
                 }, "");
 
                 return {
                     ...s,
-                    bibleRef: formattedRef
+                    bibleRef: formattedRef,
+                    displayCount: cumulativeCount // 표시용 누적 장수
                 };
             });
 
-            // ✅ 중복 설명 제거 로직: 날짜 내에서 동일한 subTitle이 반복되면 첫 번째 것만 남김
+            // ✅ 중복 설명 제거 로직
             const seenSubTitles = new Set();
             sections = baseSections.map(s => {
                 if (s.subTitle && seenSubTitles.has(s.subTitle)) {
@@ -219,14 +214,9 @@ export default function RunningCoursePath({
                             marginBottom: isLast ? (sections.length === 1 ? 50 : 0) : roadHeight
                         }}>
                             {/* 랜드마크 장식 (기존 퍼센트 기반 배치로 원복) */}
-                            {idx === 0 && (
-                                <div style={{ position: 'absolute', left: '1.2%', top: 18, display: 'flex', alignItems: 'flex-end', filter: 'drop-shadow(0 4px 8px rgba(0,0,0,0.1))', zIndex: 3 }}>
-                                    <span style={{ fontSize: 42, marginRight: -10 }}>🌳</span>
-                                    <span style={{ fontSize: 28 }}>🌲</span>
-                                </div>
-                            )}
-                            {idx === 1 && <img src="/runner_v2.png" alt="runner" style={{ position: 'absolute', right: '8%', top: 5, width: 45, height: 'auto', zIndex: 3 }} />}
-                            {idx === 2 && <img src="/sign_v2.png" alt="sign" style={{ position: 'absolute', left: '1%', top: -50, width: 65, height: 'auto', zIndex: 3 }} />}
+
+                            {idx === 1 && <img src="/runner_v2.png" alt="runner" style={{ position: 'absolute', right: '22%', top: 5, width: 28, height: 48, zIndex: 3 }} />}
+                            {idx === 2 && <img src="/sign_v2.png" alt="sign" style={{ position: 'absolute', left: '15%', top: -35, width: 50, height: 'auto', zIndex: 3 }} />}
                             {idx >= 4 && (idx % 2 === 0
                                 ? <span style={{ position: 'absolute', right: '1.2%', top: -5, fontSize: 36, opacity: 1, zIndex: 3 }}>🌳</span>
                                 : <span style={{ position: 'absolute', left: '1.2%', top: -5, fontSize: 36, opacity: 1, zIndex: 3 }}>🌷</span>
@@ -246,13 +236,13 @@ export default function RunningCoursePath({
                                 <div style={{
                                     minWidth: 48, height: 48, padding: '0 8px',
                                     borderRadius: 24,
-                                    background: checks[todayKey] ? '#E5F3E6' : '#034732',
-                                    border: checks[todayKey] ? '4px solid #064E3B' : '4px solid #F3F4F6',
+                                    background: checks[todayKey] ? '#1B9C5A' : '#034732',
+                                    border: checks[todayKey] ? '4px solid rgba(255,255,255,0.2)' : '4px solid #F3F4F6',
                                     display: 'flex', alignItems: 'center', justifyContent: 'center',
                                     fontSize: 19, fontWeight: 900,
-                                    color: checks[todayKey] ? '#064E3B' : '#ffffff',
+                                    color: '#ffffff',
                                     boxShadow: 'none'
-                                }}>{sec.count}</div>
+                                }}>{sec.displayCount}</div>
 
                                 {/* 성경 목록 (인덱스에 따라 좌/우 배치) */}
                                 <div style={{
@@ -263,23 +253,24 @@ export default function RunningCoursePath({
                                     display: 'flex',
                                     flexDirection: 'column'
                                 }}>
-                                    {/* {sec.subTitle && (
+                                    {sec.subTitle && (
                                         <div style={{
                                             fontSize: 11, fontWeight: 900,
-                                            letterSpacing: '-0.05em', // 글자 간격 좁힘
-                                            color: checks[todayKey] ? '#FFEB3B' : '#1565C0', // 체크됨: 노랑, 체크안됨: 파랑
-                                            opacity: 1, textShadow: checks[todayKey] ? '0 1px 2px rgba(0,0,0,0.2)' : 'none',
+                                            letterSpacing: '-0.05em',
+                                            color: '#FFEB3B', // 노란색으로 강조 (두 배경 모두에서 잘 보임)
+                                            opacity: 1,
+                                            textShadow: '0 1px 2px rgba(0,0,0,0.4)',
                                             marginBottom: 2,
                                             lineHeight: 1.2,
                                             wordBreak: 'keep-all'
                                         }}>
                                             {sec.subTitle.includes(':') ? sec.subTitle.split(':')[1].trim() : sec.subTitle}
                                         </div>
-                                    )} */}
+                                    )}
                                     <div style={{
                                         fontSize: 19, fontWeight: 900,
-                                        color: checks[todayKey] ? '#E5F3E6' : '#034732',
-                                        textShadow: checks[todayKey] ? '0 1px 2px rgba(0,0,0,0.2)' : 'none',
+                                        color: '#ffffff',
+                                        textShadow: '0 1px 2px rgba(0,0,0,0.3)',
                                         whiteSpace: 'pre-wrap',
                                         wordBreak: 'keep-all',
                                         lineHeight: 1.2

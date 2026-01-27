@@ -600,78 +600,129 @@ export default function CrewPage({ crewName, user }) {
       <div
         style={{
           marginTop: 28,
+          width: '100%',
           display: 'flex',
-          alignItems: 'center',
           justifyContent: 'center',
-          gap: 12,
+          position: 'relative',
         }}
       >
-        {/* 왼쪽 화살표 */}
-        <button
-          onClick={() => moveDate(-1)}
-          style={{
-            width: 45,
-            height: 45,
-            borderRadius: '50%',
-            border: 'none',
-            background: 'transparent',
-            cursor: 'pointer',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-          }}
-        >
-          <div
-            style={{
-              width: 22,
-              height: 22,
-              borderLeft: '10px solid #122654',
-              borderBottom: '10px solid #122654',
-              transform: 'rotate(45deg)',
-              borderRadius: 5,
-            }}
-          />
-        </button>
-
         {/* 오늘 분량 박스 */}
         <div
           onClick={() => toggle(todayKey)}
           style={{
-            flex: 1.3,
-            maxWidth: isMobile ? '96%' : 480, // 박스 가로폭 추가 확장
+            width: isMobile ? '96%' : '86%',
+            maxWidth: isMobile ? 'none' : 540,
             background: checks[todayKey]
-              ? 'linear-gradient(135deg, #1B9C5A 0%, #15803D 100%)'
-              : 'linear-gradient(135deg, #E2E8F0 0%, #CBD5E1 100%)',
+              ? 'linear-gradient(135deg, #2C3E50 0%, #000000 100%)' // 체크됨: 다크 스타일
+              : 'linear-gradient(135deg, #1B9C5A 0%, #15803D 100%)', // 미체크: 기존 초록색
             borderRadius: 34,
-            padding: isMobile ? '20px 10px 60px' : '24px 30px 40px', // 하단 패딩 확대 (체크박스 공간 확보)
-            color: '#111827',
+            padding: isMobile ? '20px 8px 60px' : '24px 30px 40px',
+            color: '#ffffff', // 텍스트 컬러 통일 (흰색이 두 배경 모두에 잘 어울림)
             textAlign: 'center',
             boxShadow: '0 12px 28px rgba(0,0,0,0.15)',
             cursor: isApproved ? 'pointer' : 'not-allowed',
             opacity: isApproved ? 1 : 0.6,
             position: 'relative',
-            minHeight: isMobile ? 330 : 280, // 최소 높이 확장
+            minHeight: isMobile ? 330 : 280,
             display: 'flex',
             flexDirection: 'column',
             alignItems: 'center',
             justifyContent: 'center',
             margin: '0 auto',
+            overflow: 'hidden',
           }}
         >
+          {/* 왼쪽 화살표 (박스 안으로 이동) */}
+          <button
+            onClick={(e) => {
+              e.stopPropagation();
+              moveDate(-1);
+            }}
+            style={{
+              position: 'absolute',
+              left: 0,
+              top: '50%',
+              transform: 'translateY(-50%)',
+              width: 50,
+              height: 80,
+              background: 'rgba(255,255,255,0.2)',
+              border: 'none',
+              borderRadius: '0 12px 12px 0',
+              cursor: 'pointer',
+              zIndex: 10,
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+            }}
+          >
+            <div style={{
+              width: 20, height: 20,
+              borderLeft: '6px solid #fff',
+              borderBottom: '6px solid #fff',
+              transform: 'rotate(45deg)',
+              opacity: 1.0
+            }} />
+          </button>
+
+          {/* 오른쪽 화살표 (박스 안으로 이동) */}
+          <button
+            onClick={(e) => {
+              e.stopPropagation();
+              moveDate(1);
+            }}
+            style={{
+              position: 'absolute',
+              right: 0,
+              top: '50%',
+              transform: 'translateY(-50%)',
+              width: 50,
+              height: 80,
+              background: 'rgba(255,255,255,0.2)',
+              border: 'none',
+              borderRadius: '12px 0 0 12px',
+              cursor: 'pointer',
+              zIndex: 10,
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+            }}
+          >
+            <div style={{
+              width: 20, height: 20,
+              borderRight: '6px solid #fff',
+              borderBottom: '6px solid #fff',
+              transform: 'rotate(-45deg)',
+              opacity: 1.0
+            }} />
+          </button>
+
           {/* 공원 느낌을 위한 추가 장식 배경 */}
-
           <div style={{ position: 'absolute', bottom: 40, left: 10, fontSize: 24, opacity: 0.15 }}>🍃</div>
-          {/* 날짜 */}
-          <div style={{ fontSize: 24, fontWeight: 800, color: checks[todayKey] ? '#E5F3E6' : '#034732' }}>
-            {formattedDate}
+
+          {/* 날짜 및 코스 정보 카드 */}
+          <div style={{
+            background: 'rgba(255, 255, 255, 0.85)',
+            padding: '16px 24px',
+            borderRadius: '24px',
+            boxShadow: '0 8px 20px rgba(0,0,0,0.06)',
+            marginBottom: '20px',
+            textAlign: 'center',
+            border: '1px solid rgba(255, 255, 255, 0.5)',
+            backdropFilter: 'blur(4px)',
+            width: isMobile ? '90%' : '85%',
+            maxWidth: 500,
+            boxSizing: 'border-box',
+            zIndex: 5,
+          }}>
+            <div style={{ fontSize: 22, fontWeight: 800, color: checks[todayKey] ? '#2C3E50' : '#034732' }}>
+              {formattedDate}
+            </div>
+            <div style={{ marginTop: 4, fontSize: isMobile ? 17 : 19, fontWeight: 700, color: checks[todayKey] ? '#555' : '#1B9C5A' }}>
+              성경러닝코스 (총 {todayChapters}장)
+            </div>
           </div>
 
-          {/* 성경 러닝코스 (오늘 읽을 장수) */}
-          <div style={{ marginTop: 4, fontSize: isMobile ? 18 : 20, fontWeight: 700, color: checks[todayKey] ? '#E5F3E6' : '#034732' }}>
-            성경러닝코스 (총 {todayChapters}장)
-          </div>
-
-          {/* 오늘 범위 - 시각적 러닝 코스 UI (공원 오솔길 스타일) */}
+          {/* 오늘 범위 - 시각적 러닝 코스 UI */}
           {todayPortion && (
             <RunningCoursePath
               todayPortion={todayPortion}
@@ -683,63 +734,17 @@ export default function CrewPage({ crewName, user }) {
             />
           )}
 
-          {/* 체크 박스 (왼쪽 아래) - RunningCoursePath 밖으로 이동 */}
-          <div
-            style={{
-              position: 'absolute',
-              left: 18,
-              bottom: 16,
-              display: 'flex',
-              alignItems: 'center',
-              gap: 10,
-            }}
-          >
-            <div
-              style={{
-                width: 34,
-                height: 34,
-                borderRadius: 8,
-                border: '3px solid #0F3455',
-                background: checks[todayKey] ? '#22C55E' : '#FFFFFF',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-              }}
-            >
-              {checks[todayKey] && (
-                <span style={{ fontSize: 22, color: '#064E3B' }}>✓</span>
-              )}
+          {/* 체크 박스 (왼쪽 아래) */}
+          <div style={{ position: 'absolute', left: 18, bottom: 16, display: 'flex', alignItems: 'center', gap: 10, zIndex: 5 }}>
+            <div style={{
+              width: 34, height: 34, borderRadius: 8, border: '3px solid #0F3455',
+              background: checks[todayKey] ? '#22C55E' : '#FFFFFF',
+              display: 'flex', alignItems: 'center', justifyContent: 'center'
+            }}>
+              {checks[todayKey] && <span style={{ fontSize: 22, color: '#064E3B' }}>✓</span>}
             </div>
           </div>
-
         </div>
-
-        {/* 오른쪽 화살표 */}
-        <button
-          onClick={() => moveDate(1)}
-          style={{
-            width: 45,
-            height: 45,
-            borderRadius: '50%',
-            border: 'none',
-            background: 'transparent',
-            cursor: 'pointer',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-          }}
-        >
-          <div
-            style={{
-              width: 22,
-              height: 22,
-              borderRight: '10px solid #122654',
-              borderBottom: '10px solid #122654',
-              transform: 'rotate(-45deg)',
-              borderRadius: 5,
-            }}
-          />
-        </button>
       </div>
 
       {/* 안내 문구 */}
