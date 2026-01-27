@@ -473,7 +473,6 @@ export default function CrewPage({ crewName, user }) {
         minHeight: '100vh',
         padding: isMobile ? '20px 16px 32px' : '24px 30px 40px',
         background: '#E5F3E6',
-        /* color handled per-text */
         display: 'flex',
         flexDirection: 'column',
         boxSizing: 'border-box',
@@ -735,15 +734,62 @@ export default function CrewPage({ crewName, user }) {
           )}
 
           {/* 체크 박스 (왼쪽 아래) */}
-          <div style={{ position: 'absolute', left: 18, bottom: 16, display: 'flex', alignItems: 'center', gap: 10, zIndex: 5 }}>
-            <div style={{
-              width: 34, height: 34, borderRadius: 8, border: '3px solid #0F3455',
-              background: checks[todayKey] ? '#22C55E' : '#FFFFFF',
-              display: 'flex', alignItems: 'center', justifyContent: 'center'
-            }}>
-              {checks[todayKey] && <span style={{ fontSize: 22, color: '#064E3B' }}>✓</span>}
+          <div style={{
+            position: 'absolute',
+            left: 18,
+            bottom: 16,
+            zIndex: 5 // 버튼은 배경 느낌
+          }}>
+            <div
+              onClick={() => toggle(todayKey)}
+              style={{
+                width: 60, height: 60,
+                borderRadius: '50%',
+                border: '4px solid #F3F4F6',
+                background: '#FFFFFF', // 항상 흰색
+                boxShadow: '0 4px 10px rgba(0,0,0,0.1)',
+                display: 'flex', alignItems: 'center', justifyContent: 'center',
+                flexDirection: 'column',
+                cursor: 'pointer',
+                transition: 'all 0.3s'
+              }}
+            >
+              <span style={{ fontSize: 11, fontWeight: 700, color: 'rgba(0,0,0,0.25)' }}>
+                (스탬프)
+              </span>
             </div>
           </div>
+
+          {/* 완주 스탬프 (러닝코스 카드 위, 체크박스 주변 오버레이) */}
+          {checks[todayKey] && (
+            <div
+              style={{
+                position: 'absolute',
+                left: -60,
+                bottom: -60,
+                zIndex: 10,
+                pointerEvents: 'none', // 클릭은 아래 버튼이 받음
+                width: 300,
+                height: 300,
+                display: 'flex',
+                alignItems: 'flex-end',
+                justifyContent: 'flex-start',
+              }}
+            >
+              <img
+                src="/stamps/stamps_source_clean.png"
+                alt="stamp"
+                style={{
+                  width: 230,
+                  height: 230,
+                  objectFit: 'contain',
+                  transform: 'rotate(-10deg) translate(20px, -20px)',
+                  filter: 'drop-shadow(0 4px 12px rgba(0,0,0,0.3))',
+                  animation: 'popIn 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275)'
+                }}
+              />
+            </div>
+          )}
         </div>
       </div>
 

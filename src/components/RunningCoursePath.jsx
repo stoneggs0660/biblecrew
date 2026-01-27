@@ -1,7 +1,7 @@
 import React, { useMemo } from 'react';
 import { getAbbreviation } from '../utils/bibleUtils';
 import { BIBLE_TITLES } from '../utils/bibleTitles';
-import { BIBLE_CATEGORIES, CATEGORY_DESCRIPTIONS } from '../utils/bibleThemes';
+import { BIBLE_CATEGORIES, CATEGORY_DESCRIPTIONS, BIBLE_RANGE_THEMES } from '../utils/bibleThemes';
 
 export default function RunningCoursePath({
     todayPortion,
@@ -100,16 +100,39 @@ export default function RunningCoursePath({
                 abbreviations: [abbreviateRef(s.bibleRef)]
             }));
 
-            // 4개를 넘을 경우 가장 장수가 작은 인접 섹션끼리 병합
+            const splitSection = (s) => {
+                // "장" 글자를 제거하고 ~를 -로 통일하여 단순화 시킨 후 매칭
+                const simplified = s.bibleRef.replace(/장/g, '').replace(/[~～〜∼−–—]/g, '-');
+                const match = simplified.match(/^([가-힣\s\u00A0a-zA-Z]+)\s*(\d+)(?:\s*-\s*(\d+))?/);
+
+                if (match) {
+                    const book = match[1].trim();
+                    const start = parseInt(match[2]);
+                    const end = match[3] ? parseInt(match[3]) : start;
+                    const total = end - start + 1;
+
+                    if (total >= 2) {
+                        const half = Math.floor(total / 2);
+                        const mid = start + half - 1;
+                        // 결과 생성을 위해 '장'을 다시 붙여줌
+                        const part1Ref = start === mid ? `${book} ${start}장` : `${book} ${start}장~${mid}장`;
+                        const part2Ref = (mid + 1) === end ? `${book} ${end}장` : `${book} ${mid + 1}장~${end}장`;
+                        return [
+                            { ...s, bibleRef: part1Ref, count: mid - start + 1, abbreviations: [abbreviateRef(part1Ref)], subTitle: s.subTitle },
+                            { ...s, bibleRef: part2Ref, count: end - (mid + 1) + 1, abbreviations: [abbreviateRef(part2Ref)], subTitle: "" }
+                        ];
+                    }
+                }
+                return [s];
+            };
+
+            // 4개를 넘을 경우 병합 (기존 로직 유지)
             while (merged.length > 4) {
                 let minIdx = -1;
                 let minSum = Infinity;
                 for (let i = 0; i < merged.length - 1; i++) {
                     const sum = merged[i].count + merged[i + 1].count;
-                    if (sum < minSum) {
-                        minSum = sum;
-                        minIdx = i;
-                    }
+                    if (sum < minSum) { minSum = sum; minIdx = i; }
                 }
                 if (minIdx !== -1) {
                     const a = merged[minIdx];
@@ -120,17 +143,35 @@ export default function RunningCoursePath({
                         abbreviations: [...a.abbreviations, ...b.abbreviations],
                         subTitle: (a.subTitle && b.subTitle && a.subTitle !== b.subTitle) ? `${a.subTitle} & ${b.subTitle}` : (a.subTitle || b.subTitle)
                     });
-                } else {
-                    break;
-                }
+                } else break;
             }
 
-            // ✅ 누적 장수 계산
-            let cumulativeCount = 0;
+            // ✅ 최소 3개가 될 때까지 분할 (장수가 많은 것부터)
+            for (let retry = 0; retry < 5 && merged.length < 3; retry++) {
+                let maxIdx = -1;
+                let maxCount = -1;
+                for (let i = 0; i < merged.length; i++) {
+                    if (merged[i].count > maxCount) {
+                        maxCount = merged[i].count;
+                        maxIdx = i;
+                    }
+                }
+                if (maxIdx !== -1 && merged[maxIdx].count >= 2) {
+                    const splitResult = splitSection(merged[maxIdx]);
+                    if (splitResult.length > 1) {
+                        merged.splice(maxIdx, 1, ...splitResult);
+                    } else break;
+                } else break;
+            }
 
-            const baseSections = merged.map(s => {
+            // ✅ 누적 장수 계산 및 소제목 생성
+            let cumulativeCount = 0;
+            const seenSubTitles = new Set();
+
+            sections = merged.map(s => {
                 cumulativeCount += s.count;
 
+                // 1. 성경 범위 텍스트 포맷팅
                 const formattedRef = s.abbreviations.reduce((acc, curr, i) => {
                     const safeCurr = curr.replace(/\s+/g, '\u00A0');
                     if (i === 0) return safeCurr;
@@ -151,21 +192,49 @@ export default function RunningCoursePath({
                     }
                 }, "");
 
+                // 2. 소제목 자동 생성
+                let finalSubTitle = s.subTitle || "";
+                if (!finalSubTitle) {
+                    try {
+                        const firstAbbr = s.abbreviations[0] || "";
+                        const match = firstAbbr.match(/^([가-힣]+)[\u00A0\s](\d+)/);
+                        if (match) {
+                            const bookAbbr = match[1];
+                            const chapterNum = parseInt(match[2]);
+                            const fullBookName = Object.keys(BIBLE_TITLES).find(b => getAbbreviation(b) === bookAbbr) || bookAbbr;
+
+                            const rangeThemes = BIBLE_RANGE_THEMES[fullBookName];
+                            if (rangeThemes) {
+                                const found = rangeThemes.find(r => chapterNum >= r.start && chapterNum <= r.end);
+                                if (found) finalSubTitle = found.theme;
+                            }
+                            if (!finalSubTitle) {
+                                if (s.count <= 5) {
+                                    finalSubTitle = BIBLE_TITLES[fullBookName]?.[String(chapterNum)] || "";
+                                } else {
+                                    const category = BIBLE_CATEGORIES[fullBookName];
+                                    finalSubTitle = CATEGORY_DESCRIPTIONS[category] || "";
+                                }
+                            }
+                        }
+                    } catch (e) {
+                        console.error("Subtitle auto-gen failed:", e);
+                    }
+                }
+
+                // 3. 중복 소제목 제거
+                if (finalSubTitle && seenSubTitles.has(finalSubTitle)) {
+                    finalSubTitle = "";
+                } else if (finalSubTitle) {
+                    seenSubTitles.add(finalSubTitle);
+                }
+
                 return {
                     ...s,
                     bibleRef: formattedRef,
-                    displayCount: cumulativeCount // 표시용 누적 장수
+                    displayCount: cumulativeCount,
+                    subTitle: finalSubTitle
                 };
-            });
-
-            // ✅ 중복 설명 제거 로직
-            const seenSubTitles = new Set();
-            sections = baseSections.map(s => {
-                if (s.subTitle && seenSubTitles.has(s.subTitle)) {
-                    return { ...s, subTitle: "" };
-                }
-                if (s.subTitle) seenSubTitles.add(s.subTitle);
-                return s;
             });
         }
 
@@ -264,7 +333,7 @@ export default function RunningCoursePath({
                                             lineHeight: 1.2,
                                             wordBreak: 'keep-all'
                                         }}>
-                                            {sec.subTitle.includes(':') ? sec.subTitle.split(':')[1].trim() : sec.subTitle}
+                                            {sec.subTitle}
                                         </div>
                                     )}
                                     <div style={{

@@ -1,2 +1,8 @@
 
-.floating-bookmark-btn{position:fixed;right:20px;bottom:20px;z-index:999;padding:12px 18px;border:none;border-radius:40px;background:#ffb400;color:#fff;font-weight:600;box-shadow:0 4px 12px rgba(0,0,0,0.2);} .floating-bookmark-btn:active{transform:translateY(1px);} 
+.floating-bookmark-btn{position:fixed;right:20px;bottom:20px;z-index:999;padding:12px 18px;border:none;border-radius:40px;background:#ffb400;color:#fff;font-weight:600;box-shadow:0 4px 12px rgba(0,0,0,0.2);} .floating-bookmark-btn:active{transform:translateY(1px);}
+
+@keyframes popIn {
+  0% { transform: scale(0) rotate(30deg); opacity: 0; }
+  80% { transform: scale(1.1) rotate(-10deg); opacity: 1; }
+  100% { transform: scale(1) rotate(-5deg); opacity: 1; }
+}
