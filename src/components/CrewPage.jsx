@@ -530,6 +530,27 @@ export default function CrewPage({ crewName, user }) {
         {displayName}
       </h2>
 
+      {crewName === '고급반' && (
+        <div style={{ color: '#4B5563', fontSize: 15, fontWeight: 500, textAlign: 'center', marginBottom: 10 }}>
+          30일동안 성경 1독하기
+        </div>
+      )}
+      {crewName === '중급반' && (
+        <div style={{ color: '#4B5563', fontSize: 15, fontWeight: 500, textAlign: 'center', marginBottom: 10 }}>
+          30일동안 구약 1독하기
+        </div>
+      )}
+      {(crewName === '초급반(구약A)' || crewName === '초급반(구약B)') && (
+        <div style={{ color: '#4B5563', fontSize: 15, fontWeight: 500, textAlign: 'center', marginBottom: 10 }}>
+          30일동안 구약 반 읽기
+        </div>
+      )}
+      {crewName === '초급반' && (
+        <div style={{ color: '#4B5563', fontSize: 15, fontWeight: 500, textAlign: 'center', marginBottom: 10 }}>
+          30일동안 신약 1독하기
+        </div>
+      )}
+
       {crewName === '구약파노라마' && (
         <div style={{ color: '#4B5563', fontSize: 14, fontWeight: 500, textAlign: 'center', lineHeight: 1.6, maxWidth: 600, margin: '0 auto' }}>
           &lt;구약성경의 지루한 부분은 빼고, 중요한 부분만 파노라마식으로 한 달동안 읽어 구약전체를 그려볼 수 있는 반 입니다&gt;
@@ -765,25 +786,27 @@ export default function CrewPage({ crewName, user }) {
             <div
               style={{
                 position: 'absolute',
-                left: -60,
-                bottom: -60,
+                // 원 중심(left:18+30=48, bottom:16+30=46)에 스탬프(200x200) 중심 맞추기
+                // left: 48 - 100 = -52, bottom: 46 - 100 = -54
+                left: -52,
+                bottom: -54,
                 zIndex: 10,
-                pointerEvents: 'none', // 클릭은 아래 버튼이 받음
-                width: 300,
-                height: 300,
+                pointerEvents: 'none',
+                width: 200,
+                height: 200,
                 display: 'flex',
-                alignItems: 'flex-end',
-                justifyContent: 'flex-start',
+                alignItems: 'center', // 중앙 정렬
+                justifyContent: 'center',
               }}
             >
               <img
                 src="/stamps/stamps_source_clean.png"
                 alt="stamp"
                 style={{
-                  width: 230,
-                  height: 230,
+                  width: 190, // 크기 230 -> 190으로 축소
+                  height: 190,
                   objectFit: 'contain',
-                  transform: 'rotate(-10deg) translate(20px, -20px)',
+                  transform: 'rotate(-10deg)', // translate 제거하여 정중앙 위치
                   filter: 'drop-shadow(0 4px 12px rgba(0,0,0,0.3))',
                   animation: 'popIn 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275)'
                 }}
