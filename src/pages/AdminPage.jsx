@@ -13,7 +13,6 @@ import {
   subscribeToAllCrewChecks,
   subscribeToMonthlyHallOfFame,
   saveMonthlyHallOfFame,
-  resetHallOfFame,
   getCurrentYMKey,
   subscribeToCrewApprovals,
   addCrewApprovalName,
@@ -22,7 +21,6 @@ import {
   approveAllNextMonthApplicants,
   getNextYMKey,
   clearCrewApprovals,
-  resetAllData,
   resetUserPassword,
   updateAdminPassword,
   subscribeToNotice,
@@ -36,12 +34,15 @@ import {
   hardDeleteUser,
   saveCrewApprovalMode,
   subscribeToCrewApprovalModes,
+  saveMonthlyReport,
+  getMonthlyReportMonths,
+  fetchMonthlyReport,
+  getYearlyHallOfFame,
 } from '../firebaseSync';
 import { calculateMonthlyRankingForMonth } from '../utils/rankingUtils';
 import { getMonthDates } from '../utils/dateUtils';
 import { getDailyBiblePortionByCrew } from '../utils/bibleUtils';
 import { getTodayCrewState } from '../utils/crewStatusUtils';
-import LastMonthResultModal from '../components/LastMonthResultModal.jsx';
 
 export default function AdminPage() {
   const navigate = useNavigate();
@@ -54,10 +55,8 @@ export default function AdminPage() {
   });
   const [selectedUser, setSelectedUser] = useState(null);
   const [checks, setChecks] = useState({});
-  const [lastModalVisible, setLastModalVisible] = useState(false);
   const [noticeTitle, setNoticeTitle] = useState('');
   const [noticeContent, setNoticeContent] = useState('');
-  const [lastMonthData, setLastMonthData] = useState(null);
   const [lastYM, setLastYM] = useState({ year: null, month: null });
   const [settings, setSettings] = useState({});
   const [churchNameInput, setChurchNameInput] = useState('');
@@ -89,6 +88,19 @@ export default function AdminPage() {
   const [manualHoFLoading, setManualHoFLoading] = useState(false);
   const ymKey = getCurrentYMKey();
   const nextYmKey = getNextYMKey();
+
+  const [reportMonths, setReportMonths] = useState([]);
+  const [selectedReportYM, setSelectedReportYM] = useState('');
+  const [reportData, setReportData] = useState(null);
+  const [reportLoading, setReportLoading] = useState(false);
+
+  const [yearlyData, setYearlyData] = useState([]);
+  const [yearlyLoading, setYearlyLoading] = useState(false);
+  const [yearlyFilter, setYearlyFilter] = useState('all'); // all, full, advanced, intermediate...
+
+  const [selectedYearForReport, setSelectedYearForReport] = useState(new Date().getFullYear());
+  const [showMonthlyArchive, setShowMonthlyArchive] = useState(false);
+  const [showYearlyReport, setShowYearlyReport] = useState(false);
 
   const checksUnsubRef = useRef(null);
 
@@ -443,12 +455,6 @@ export default function AdminPage() {
     });
   }
 
-  function handleResetAllDataClick() {
-    if (!window.confirm('전체 초기화 시 모든 데이터가 삭제됩니다. 계속하시겠습니까?')) return;
-    resetAllData().then(() => {
-      alert('전체 데이터가 초기화되었습니다.');
-    });
-  }
 
   function handleFinalizeLastMonth() {
     const now = new Date();
@@ -470,12 +476,6 @@ export default function AdminPage() {
     });
   }
 
-  function handleResetHallOfFameClick() {
-    if (!window.confirm('새해 기준으로 명예의 전당 데이터를 리셋하시겠습니까? (개인 기록은 유지됩니다)')) return;
-    resetHallOfFame().then(() => {
-      alert('명예의 전당 새해 리셋이 완료되었습니다. (개인 기록은 유지됩니다)');
-    });
-  }
 
 
   async function handleManualHallOfFameAdjust() {
@@ -507,35 +507,148 @@ export default function AdminPage() {
     } catch (e) {
       console.error(e);
       alert('수동 수정 중 오류가 발생했습니다.');
+    }
+  }
+
+  // ✅ 월별 보고서 로드
+  useEffect(() => {
+    getMonthlyReportMonths().then(setReportMonths);
+  }, []);
+
+  async function handleLoadReport(ym) {
+    setSelectedReportYM(ym);
+    if (!ym) {
+      setReportData(null);
+      return;
+    }
+    setReportLoading(true);
+    try {
+      const data = await fetchMonthlyReport(ym);
+      setReportData(data);
+    } catch (e) {
+      console.error(e);
+      alert('보고서를 불러오는 중 오류가 발생했습니다.');
     } finally {
-      setManualHoFLoading(false);
+      setReportLoading(false);
     }
   }
 
-  function handleShowLastMonthModal() {
+  async function handleSaveCurrentReport() {
     const now = new Date();
-    let year = now.getFullYear();
-    let month = now.getMonth() + 1;
-    if (month === 1) {
-      year = year - 1;
-      month = 12;
-    } else {
-      month = month - 1;
-    }
-    setLastYM({ year, month });
+    const year = now.getFullYear();
+    const month = now.getMonth() + 1;
+    const key = `${year}-${String(month).padStart(2, '0')}`;
 
-    // ✅ 모달은 '한 번'만 데이터를 가져오면 되므로, 구독 후 바로 해제
-    let unsub = null;
-    unsub = subscribeToMonthlyHallOfFame(year, (data) => {
-      const monthData = (data && data[month]) || null;
-      setLastMonthData(monthData);
-      setLastModalVisible(true);
-      if (typeof unsub === 'function') {
-        try { unsub(); } catch (e) { }
-        unsub = null;
-      }
+    if (!window.confirm(`${key} 월의 현재 진행 현황을 최종 보고서로 저장하시겠습니까?\n이미 저장된 경우 덮어씌워집니다.`)) return;
+
+    // 현재 crewStatus 기반으로 리포트 데이터 생성
+    const reportPayload = {};
+    Object.entries(crewStatus).forEach(([crew, members]) => {
+      members.forEach((m) => {
+        const userMedals = users[m.uid]?.medals || {};
+        const totalMedals = (userMedals.gold || 0) + (userMedals.silver || 0) + (userMedals.bronze || 0);
+
+        reportPayload[m.uid] = {
+          uid: m.uid,
+          name: m.name,
+          crew: crew,
+          chapters: m.chapters,
+          progress: m.progress,
+          stateLabel: m.stateLabel, // 성공, 실패 등
+          totalMedals: totalMedals
+        };
+      });
     });
+
+    try {
+      await saveMonthlyReport(year, month, reportPayload);
+      alert(`${key} 월 보고서가 저장되었습니다.`);
+      // 목록 갱신
+      const updatedMonths = await getMonthlyReportMonths();
+      setReportMonths(updatedMonths);
+    } catch (e) {
+      console.error(e);
+      alert('보고서 저장 중 오류가 발생했습니다.');
+    }
   }
+
+  // ✅ 연간 누적 데이터 계산 및 로드
+  async function handleLoadYearlyReport(targetYear) {
+    const year = targetYear || selectedYearForReport;
+    setYearlyLoading(true);
+    try {
+      const allMonths = await getYearlyHallOfFame(year); // { "01": { gold: [...], ... }, "02": ... }
+
+      const userSummary = {}; // { name: { countInfo, bibleReads } }
+
+      Object.entries(allMonths).forEach(([month, medals]) => {
+        ['gold', 'silver', 'bronze'].forEach(mKey => {
+          (medals[mKey] || []).forEach(entry => {
+            const name = entry.name;
+            const crew = entry.crew;
+            if (!userSummary[name]) {
+              userSummary[name] = {
+                name,
+                crews: {},
+                totalBible: 0,
+                // 계산용 카운트
+                cnt: { adv: 0, int: 0, nt: 0, ota: 0, otb: 0 }
+              };
+            }
+
+            // 반별 카운트 증가
+            userSummary[name].crews[crew] = (userSummary[name].crews[crew] || 0) + 1;
+
+            // 1독 계산용 매핑
+            if (crew === '고급반') userSummary[name].cnt.adv++;
+            if (crew === '중급반') userSummary[name].cnt.int++;
+            if (crew === '초급반') userSummary[name].cnt.nt++;
+            if (crew === '초급반(구약A)') userSummary[name].cnt.ota++;
+            if (crew === '초급반(구약B)') userSummary[name].cnt.otb++;
+          });
+        });
+      });
+
+      // 1독(Bible Reads) 최종 계산
+      const processedList = Object.values(userSummary).map(u => {
+        let bibleCount = 0;
+        let ntPool = u.cnt.nt;
+
+        // 1. 고급반은 무조건 +1독
+        bibleCount += u.cnt.adv;
+
+        // 2. 중급반 + 신약초급반 세트
+        const intSets = Math.min(u.cnt.int, ntPool);
+        bibleCount += intSets;
+        ntPool -= intSets;
+
+        // 3. 구약A + 구약B + 신약초급반 세트
+        const otSets = Math.min(u.cnt.ota, u.cnt.otb, ntPool);
+        bibleCount += otSets;
+
+        return { ...u, totalBible: bibleCount };
+      });
+
+      setYearlyData(processedList.sort((a, b) => b.totalBible - a.totalBible || a.name.localeCompare(b.name)));
+    } catch (e) {
+      console.error(e);
+      alert('연간 보고서를 생성하는 중 오류가 발생했습니다.');
+    } finally {
+      setYearlyLoading(false);
+    }
+  }
+
+  // 초기 로드
+  useEffect(() => {
+    handleLoadYearlyReport();
+  }, []);
+
+  const filteredYearlyData = yearlyData.filter(u => {
+    if (yearlyFilter === 'all') return true;
+    if (yearlyFilter === 'full') return u.totalBible > 0;
+    // 특정 반 필터링 (CREW_KEYS에 있는 모든 반 대응)
+    return (u.crews[yearlyFilter] || 0) > 0;
+  });
 
   // ✅ 사용자 상태(status) 기반 목록
   // - crew가 null이면 미배정
@@ -550,7 +663,25 @@ export default function AdminPage() {
 
   return (
     <div style={{ padding: 20, minHeight: '100vh', background: '#F1FAEE' }}>
-      <h2 style={{ color: '#1D3557', marginBottom: 10 }}>⚙️ 관리자 모드</h2>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
+        <h2 style={{ color: '#1D3557', margin: 0 }}>⚙️ 관리자 모드</h2>
+        <button
+          onClick={() => navigate('/home')}
+          style={{
+            padding: '8px 16px',
+            borderRadius: 10,
+            border: 'none',
+            background: '#457B9D',
+            color: '#fff',
+            fontSize: 14,
+            fontWeight: 'bold',
+            cursor: 'pointer',
+            boxShadow: '0 4px 10px rgba(0,0,0,0.1)',
+          }}
+        >
+          🏠 홈으로 가기
+        </button>
+      </div>
       <p style={{ marginBottom: 20 }}>사용자 반 배정, 체크 수정, 소감/명예의 전당 관리를 할 수 있습니다.</p>
 
       {/* 반 안내팝업 전용 편집 페이지 */}
@@ -1175,51 +1306,7 @@ export default function AdminPage() {
             marginRight: 8,
           }}
         >
-          지난달 명예의 전당 확정
-        </button>
-        <button
-          onClick={handleShowLastMonthModal}
-          style={{
-            padding: '8px 16px',
-            borderRadius: 8,
-            border: 'none',
-            background: '#457B9D',
-            color: '#fff',
-            fontWeight: 'bold',
-            cursor: 'pointer',
-            marginRight: 8,
-          }}
-        >
-          지난달 결과 보기
-        </button>
-        <button
-          onClick={handleResetHallOfFameClick}
-          style={{
-            padding: '8px 16px',
-            borderRadius: 8,
-            border: 'none',
-            background: '#A8A8A8',
-            color: '#fff',
-            fontWeight: 'bold',
-            cursor: 'pointer',
-            marginRight: 8,
-          }}
-        >
-          명예의 전당 새해 리셋
-        </button>
-        <button
-          onClick={handleResetAllDataClick}
-          style={{
-            padding: '8px 16px',
-            borderRadius: 8,
-            border: 'none',
-            background: '#B71C1C',
-            color: '#fff',
-            fontWeight: 'bold',
-            cursor: 'pointer',
-          }}
-        >
-          전체 초기화 (모든 데이터 삭제)
+          지난달 명예의 전당 수동확정
         </button>
       </div>
 
@@ -1458,13 +1545,244 @@ export default function AdminPage() {
         </button>
       </div>
 
-      <LastMonthResultModal
-        visible={lastModalVisible}
-        onClose={() => setLastModalVisible(false)}
-        data={lastMonthData}
-        year={lastYM.year}
-        month={lastYM.month}
-      />
+      {/* 📊 월별 결과 보고서 */}
+      <div
+        style={{
+          marginBottom: 20,
+          padding: 16,
+          borderRadius: 12,
+          background: '#FFFFFF',
+          boxShadow: '0 4px 12px rgba(0,0,0,0.04)',
+        }}
+      >
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14 }}>
+          <h3 style={{ margin: 0, color: '#1D3557' }}>📊 월별 결과 보고서 (아카이브)</h3>
+          <div style={{ display: 'flex', gap: 8 }}>
+            <button
+              onClick={handleSaveCurrentReport}
+              style={{
+                padding: '8px 14px',
+                borderRadius: 8,
+                border: 'none',
+                background: '#2A9D8F',
+                color: '#fff',
+                fontSize: 13,
+                fontWeight: 'bold',
+                cursor: 'pointer',
+              }}
+            >
+              🏁 현재 현황을 보고서로 저장
+            </button>
+            <button
+              onClick={() => setShowMonthlyArchive(!showMonthlyArchive)}
+              style={{
+                padding: '8px 14px',
+                borderRadius: 8,
+                border: '1px solid #1D3557',
+                background: showMonthlyArchive ? '#f1f1f1' : '#fff',
+                color: '#1D3557',
+                fontSize: 13,
+                fontWeight: 'bold',
+                cursor: 'pointer',
+              }}
+            >
+              {showMonthlyArchive ? '🔼 닫기' : '🔽 열기'}
+            </button>
+          </div>
+        </div>
+
+        {showMonthlyArchive && (
+          <>
+            <div style={{ marginBottom: 16 }}>
+              <label style={{ fontSize: 13, marginRight: 8 }}>보고서 선택:</label>
+              <select
+                value={selectedReportYM}
+                onChange={(e) => handleLoadReport(e.target.value)}
+                style={{ padding: '6px 10px', borderRadius: 8, border: '1px solid #ccc' }}
+              >
+                <option value="">-- 월 선택 --</option>
+                {reportMonths.map(m => <option key={m} value={m}>{m}</option>)}
+              </select>
+            </div>
+
+            {reportLoading && <p>데이터를 불러오는 중...</p>}
+
+            {reportData && (
+              <div style={{ overflowX: 'auto' }}>
+                <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
+                  <thead>
+                    <tr style={{ background: '#f8f9fa', borderBottom: '2px solid #dee2e6' }}>
+                      <th style={{ padding: 10, textAlign: 'left' }}>반</th>
+                      <th style={{ padding: 10, textAlign: 'left' }}>이름</th>
+                      <th style={{ padding: 10, textAlign: 'center' }}>읽은 장수</th>
+                      <th style={{ padding: 10, textAlign: 'center' }}>진행률</th>
+                      <th style={{ padding: 10, textAlign: 'center' }}>상태</th>
+                      <th style={{ padding: 10, textAlign: 'center' }}>누적 메달</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {Object.values(reportData)
+                      .sort((a, b) => a.crew.localeCompare(b.crew) || a.name.localeCompare(b.name))
+                      .map((row) => (
+                        <tr key={row.uid} style={{ borderBottom: '1px solid #eee' }}>
+                          <td style={{ padding: 10 }}>{row.crew}</td>
+                          <td style={{ padding: 10, fontWeight: 'bold' }}>{row.name}</td>
+                          <td style={{ padding: 10, textAlign: 'center' }}>{row.chapters}장</td>
+                          <td style={{ padding: 10, textAlign: 'center' }}>{row.progress}%</td>
+                          <td style={{ padding: 10, textAlign: 'center' }}>
+                            <span style={{
+                              padding: '2px 6px',
+                              borderRadius: 4,
+                              fontSize: 11,
+                              color: '#fff',
+                              background: row.stateLabel === '성공' ? '#2E7D32' : row.stateLabel === '도전중' ? '#1E88E5' : '#D32F2F'
+                            }}>
+                              {row.stateLabel}
+                            </span>
+                          </td>
+                          <td style={{ padding: 10, textAlign: 'center' }}>{row.totalMedals}개</td>
+                        </tr>
+                      ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </>
+        )}
+      </div>
+
+      {/* 🏆 2026 연간 누적 보고서 (1독 달성 현황) */}
+      <div
+        style={{
+          marginBottom: 20,
+          padding: 16,
+          borderRadius: 12,
+          background: '#ffffff',
+          boxShadow: '0 4px 12px rgba(0,0,0,0.04)',
+        }}
+      >
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+            <h3 style={{ margin: 0, color: '#1D3557' }}>🏆 올해 누적 보고서 (성경 1독 현황)</h3>
+            <select
+              value={selectedYearForReport}
+              onChange={(e) => {
+                const yr = Number(e.target.value);
+                setSelectedYearForReport(yr);
+                handleLoadYearlyReport(yr);
+              }}
+              style={{ padding: '4px 8px', borderRadius: 8, border: '1px solid #ccc', fontSize: 13 }}
+            >
+              {[2024, 2025, 2026, 2027].map(y => <option key={y} value={y}>{y}년</option>)}
+            </select>
+          </div>
+          <div style={{ display: 'flex', gap: 8 }}>
+            <button
+              onClick={() => handleLoadYearlyReport()}
+              style={{
+                padding: '6px 12px',
+                borderRadius: 8,
+                border: '1px solid #457B9D',
+                background: '#fff',
+                color: '#457B9D',
+                fontSize: 12,
+                cursor: 'pointer',
+              }}
+            >
+              🔄 데이터 갱신
+            </button>
+            <button
+              onClick={() => setShowYearlyReport(!showYearlyReport)}
+              style={{
+                padding: '6px 12px',
+                borderRadius: 8,
+                border: '1px solid #1D3557',
+                background: showYearlyReport ? '#f1f1f1' : '#fff',
+                color: '#1D3557',
+                fontSize: 12,
+                fontWeight: 'bold',
+                cursor: 'pointer',
+              }}
+            >
+              {showYearlyReport ? '🔼 닫기' : '🔽 열기'}
+            </button>
+          </div>
+        </div>
+
+        {showYearlyReport && (
+          <>
+            <div style={{ display: 'flex', gap: 6, marginBottom: 16, flexWrap: 'wrap' }}>
+              <button onClick={() => setYearlyFilter('all')} style={filterBtnStyle(yearlyFilter === 'all')}>전체 보기</button>
+              <button onClick={() => setYearlyFilter('full')} style={filterBtnStyle(yearlyFilter === 'full')}>📖 1독 이상 달성자</button>
+              {CREW_KEYS.map(ck => (
+                <button
+                  key={ck}
+                  onClick={() => setYearlyFilter(ck)}
+                  style={filterBtnStyle(yearlyFilter === ck)}
+                >
+                  {getCrewLabel(ck)} 완주자
+                </button>
+              ))}
+            </div>
+
+            {yearlyLoading ? <p>분석 중...</p> : (
+              <div style={{ overflowX: 'auto' }}>
+                <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
+                  <thead>
+                    <tr style={{ background: '#f8f9fa', borderBottom: '2px solid #dee2e6' }}>
+                      <th style={{ padding: 10, textAlign: 'left' }}>이름</th>
+                      <th style={{ padding: 10, textAlign: 'center' }}>총 완주 반</th>
+                      <th style={{ padding: 10, textAlign: 'center' }}>성경 1독</th>
+                      <th style={{ padding: 10, textAlign: 'left', fontSize: 11, color: '#666' }}>상세 완주 내역</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {filteredYearlyData.map((u) => (
+                      <tr key={u.name} style={{ borderBottom: '1px solid #eee' }}>
+                        <td style={{ padding: 10, fontWeight: 'bold' }}>{u.name}</td>
+                        <td style={{ padding: 10, textAlign: 'center' }}>
+                          {Object.values(u.crews).reduce((a, b) => a + b, 0)}개 반
+                        </td>
+                        <td style={{ padding: 10, textAlign: 'center' }}>
+                          <span style={{
+                            padding: '4px 8px',
+                            borderRadius: 20,
+                            background: u.totalBible > 0 ? '#E9C46A' : '#f0f0f0',
+                            color: u.totalBible > 0 ? '#000' : '#888',
+                            fontWeight: 'bold',
+                            fontSize: 12
+                          }}>
+                            🔥 {u.totalBible}독
+                          </span>
+                        </td>
+                        <td style={{ padding: 10, fontSize: 11 }}>
+                          {Object.entries(u.crews).map(([c, count]) => (
+                            <span key={c} style={{ marginRight: 8, display: 'inline-block' }}>
+                              {c}({count})
+                            </span>
+                          ))}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </>
+        )}
+      </div>
+
     </div>
   );
 }
+
+const filterBtnStyle = (active) => ({
+  padding: '6px 12px',
+  borderRadius: 20,
+  border: '1px solid #457B9D',
+  background: active ? '#457B9D' : '#fff',
+  color: active ? '#fff' : '#457B9D',
+  fontSize: 12,
+  fontWeight: active ? 'bold' : 'normal',
+  cursor: 'pointer',
+});

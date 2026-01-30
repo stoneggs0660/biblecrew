@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { subscribeToHallOfFameYear, subscribeToLegacyMonthlyHallOfFame } from '../firebaseSync';
+import { subscribeToHallOfFameYear, subscribeToLegacyMonthlyHallOfFame, saveMonthlyHallOfFame } from '../firebaseSync';
 import { db } from '../firebase';
 import { ref, onValue, set, get } from 'firebase/database';
 import { getMonthDates } from '../utils/dateUtils';
@@ -182,14 +182,23 @@ export default function HallOfFame() {
 
           // DB에 저장(이미 있으면 skip)
           (async () => {
-            for (const medal of ['gold', 'silver', 'bronze']) {
-              const outRef = ref(db, `hallOfFame/${prevYear}/monthlyResults/${prevMM}/${medal}`);
-              const existing = await get(outRef);
-              if (existing.exists()) continue;
-              // 이름 정렬(보기 좋게)
-              const names = (successNamesByMedal[medal] || []).filter(Boolean);
-              names.sort((a, b) => String(a).localeCompare(String(b), 'ko'));
-              await set(outRef, names);
+            // ✅ 중복/경로 통합된 공용 함수 사용
+            const ranking = [];
+            ['gold', 'silver', 'bronze'].forEach(medal => {
+              (successNamesByMedal[medal] || []).forEach(item => {
+                // ranking 구조: { uid, name, crew, medal }
+                // 현재 userKey(이름)를 uid로 사용 중
+                ranking.push({
+                  uid: item.name,
+                  name: item.name,
+                  crew: item.crew,
+                  medal: medal
+                });
+              });
+            });
+
+            if (ranking.length > 0) {
+              await saveMonthlyHallOfFame(prevYear, prevMonth, ranking);
             }
           })().catch(() => { });
         }

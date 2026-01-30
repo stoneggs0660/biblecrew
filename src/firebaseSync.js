@@ -364,49 +364,71 @@ export function subscribeToMonthlyMedalStatus(year, month2, callback) {
   return unsubscribe;
 }
 
-// ✅ 명예의 전당: 월 데이터 저장 (금/은/동)
+// ✅ 명예의 전당: 월 데이터 저장 (금/은/동) - 안전한(중복방지) 버전
 export async function saveMonthlyHallOfFame(year, month, ranking) {
-  const db = getDatabase();
-  const pathRef = ref(db, `hallOfFame/monthly/${year}/${month}`);
-  const payload = { gold: {}, silver: {}, bronze: {} };
+  const db2 = getDatabase();
+  const monthStr = String(month).padStart(2, '0');
+  const ymKey = `${year}-${monthStr}`;
 
-  (ranking || []).forEach((u) => {
-    if (!u.medal) return;
-    const bucket = payload[u.medal];
-    if (!bucket) return;
-    const key = u.uid || u.name || Math.random().toString(36).slice(2);
-    bucket[key] = {
-      name: u.name || "이름없음",
-      crew: u.crew || "",
-      chapters: u.chapters || 0,
-    };
-  });
+  // 1. 저장할 데이터 구조 준비 (신규/구조 통합)
+  const resultsByMedal = { gold: [], silver: [], bronze: [] };
+  const legacyPayload = { gold: {}, silver: {}, bronze: {} };
 
-  // 월별 명예의 전당 저장
-  await set(pathRef, payload);
-
-  // 각 사용자별 메달 누적 카운트 반영
+  // 2. 각 사용자별 처리
   const tasks = [];
-  (ranking || []).forEach((u) => {
-    if (!u.medal || !u.uid) return;
+  for (const u of (ranking || [])) {
+    if (!u.medal || !u.uid) continue;
+
     const medalKey = u.medal; // 'gold' | 'silver' | 'bronze'
-    const medalRef = ref(db, `users/${u.uid}/medals/${medalKey}`);
-    const t = get(medalRef).then((snap) => {
-      const current = snap.val() || 0;
-      return set(medalRef, current + 1);
-    });
-    tasks.push(t);
-  });
+    const displayName = u.name || "이름없음";
+    const crewName = u.crew || "";
+
+    // 명단에 추가
+    resultsByMedal[medalKey].push({ name: displayName, crew: crewName });
+    legacyPayload[medalKey][u.uid] = { name: displayName, crew: crewName, chapters: u.chapters || 0 };
+
+    // ✅ 중복 지급 방지 로직
+    const awardRecordRef = ref(db2, `users/${u.uid}/earnedMedals/${ymKey}`);
+    const medalCountRef = ref(db2, `users/${u.uid}/medals/${medalKey}`);
+
+    const awardSnap = await get(awardRecordRef);
+    const alreadyAwarded = awardSnap.val();
+
+    if (alreadyAwarded === medalKey) {
+      // 이미 같은 메달을 받았다면 카운트 증가 생략
+      continue;
+    } else if (alreadyAwarded && alreadyAwarded !== medalKey) {
+      // 다른 메달을 이미 받았다면 (기존꺼 -1, 새꺼 +1) - 드문 경우지만 대응
+      const oldMedalRef = ref(db2, `users/${u.uid}/medals/${alreadyAwarded}`);
+      tasks.push((async () => {
+        const oldSnap = await get(oldMedalRef);
+        const nextSnap = await get(medalCountRef);
+        await set(oldMedalRef, Math.max(0, (oldSnap.val() || 0) - 1));
+        await set(medalCountRef, (nextSnap.val() || 0) + 1);
+        await set(awardRecordRef, medalKey);
+      })());
+    } else {
+      // 처음 받는 경우면 카운트 +1
+      tasks.push((async () => {
+        const curSnap = await get(medalCountRef);
+        await set(medalCountRef, (curSnap.val() || 0) + 1);
+        await set(awardRecordRef, medalKey);
+      })());
+    }
+  }
+
+  // 3. DB 실제 저장 (경로 통합)
+  // 신규 경로: hallOfFame/{year}/monthlyResults/{month}/{medal}
+  for (const medal of ['gold', 'silver', 'bronze']) {
+    tasks.push(set(ref(db2, `hallOfFame/${year}/monthlyResults/${monthStr}/${medal}`), resultsByMedal[medal]));
+  }
+  // 구버전 경로 호환성 유지: hallOfFame/monthly/{year}/{month}
+  tasks.push(set(ref(db2, `hallOfFame/monthly/${year}/${month}`), legacyPayload));
 
   await Promise.all(tasks);
   return true;
 }
 
-// ✅ 명예의 전당 전체 리셋
-export function resetHallOfFame() {
-  const path = ref(db, "hallOfFame");
-  return set(path, null);
-}
 
 
 // ✅ 명예의 전당 수동 수정: 특정 연/월/사용자의 메달 조정 (월별 + 개인 메달 동기화)
@@ -608,13 +630,6 @@ export function subscribeToUserApproval(crew, ymKey, uid, callback) {
   return unsubscribe;
 }
 
-// 전체 데이터 초기화 (모든 기록 삭제)
-export function resetAllData() {
-  const rootRef = ref(db, '/');
-  return set(rootRef, null);
-}
-
-
 
 // ✅ 사용자 로그인 & 비밀번호 관리
 
@@ -758,8 +773,9 @@ export function saveNextMonthApplication(crew, uid, name) {
   const byCrewRef = ref(db, `/nextMonthApplications/${ymKey}/${crew}/${uid}`);
   const byUserRef = ref(db, `/nextMonthApplicationsByUser/${ymKey}/${uid}`);
 
-  // 항상 한 사용자는 한 크루만 신청 가능하도록,
-  // 저장 전에 모든 크루에서 기존 신청을 제거한 뒤 새 신청을 저장한다.
+  // ✅ 누적 신청 기록용 (승인되어도 삭제하지 않음)
+  const historyRef = ref(db, `/applicationHistory/${ymKey}/${uid}`);
+
   return get(rootRef).then((snap) => {
     const val = snap.val() || {};
     const tasks = [];
@@ -772,9 +788,9 @@ export function saveNextMonthApplication(crew, uid, name) {
       }
     });
 
-    // 새 신청 저장 (관리자 조회용 / 사용자 조회용)
     tasks.push(set(byCrewRef, base));
     tasks.push(set(byUserRef, base));
+    tasks.push(set(historyRef, base)); // 히스토리 저장
 
     return Promise.all(tasks);
   });
@@ -873,11 +889,12 @@ export async function getRecentApplicationMonths(limit = 3) {
   return toKeep.sort().reverse();
 }
 
-// 특정 연-월(YYYY-MM)의 신청자 전체 데이터를 불러오기 (관리자용)
+// 특정 연-월(YYYY-MM)의 신청자 전체 데이터를 불러오기 (누적 히스토리 기준)
 export async function fetchApplicationsByMonth(ymKey) {
   if (!ymKey) return {};
   const db = getDatabase();
-  const rootRef = ref(db, `/nextMonthApplications/${ymKey}`);
+  // ✅ nextMonthApplications 대신 applicationHistory를 조회하여 승인된 사람도 포함되게 함
+  const rootRef = ref(db, `/applicationHistory/${ymKey}`);
   const snap = await get(rootRef);
   return snap.val() || {};
 }
@@ -987,4 +1004,36 @@ export function subscribeToLastBibleBookmark(uid, callback) {
     callback(snap.val() || null);
   }, err => callback(null));
   return () => unsub();
+}
+
+// ✅ 월별 결과 보고서 저장
+export async function saveMonthlyReport(year, month, reportData) {
+  const db2 = getDatabase();
+  const path = ref(db2, `monthlyReports/${year}-${String(month).padStart(2, '0')}`);
+  await set(path, reportData);
+  return true;
+}
+
+// ✅ 월별 결과 보고서 조회 (연-월 목록)
+export async function getMonthlyReportMonths() {
+  const db2 = getDatabase();
+  const r = ref(db2, 'monthlyReports');
+  const snap = await get(r);
+  const val = snap.val() || {};
+  return Object.keys(val).sort().reverse();
+}
+
+// ✅ 특정 월 보고서 데이터 가져오기
+export async function fetchMonthlyReport(ymKey) {
+  const db2 = getDatabase();
+  const r = ref(db2, `monthlyReports/${ymKey}`);
+  const snap = await get(r);
+  return snap.val() || {};
+}
+// ✅ 특정 연도의 모든 월별 데이터 가져오기 (명예의 전당 기준)
+export async function getYearlyHallOfFame(year) {
+  const db2 = getDatabase();
+  const r = ref(db2, `hallOfFame/${year}/monthlyResults`);
+  const snap = await get(r);
+  return snap.val() || {};
 }
