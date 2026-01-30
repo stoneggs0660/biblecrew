@@ -101,6 +101,8 @@ export default function AdminPage() {
   const [selectedYearForReport, setSelectedYearForReport] = useState(new Date().getFullYear());
   const [showMonthlyArchive, setShowMonthlyArchive] = useState(false);
   const [showYearlyReport, setShowYearlyReport] = useState(false);
+  const [showCrewStatus, setShowCrewStatus] = useState(false);
+  const [showUnassignedUsers, setShowUnassignedUsers] = useState(false);
 
   const checksUnsubRef = useRef(null);
 
@@ -132,11 +134,14 @@ export default function AdminPage() {
     crewNames.forEach((c) => {
       status[c] = [];
     });
-    Object.entries(crews || {}).forEach(([crew, crewNode]) => {
-      const usersNode = crewNode && crewNode.users;
-      if (!usersNode) return;
-      Object.entries(usersNode).forEach(([uid, u]) => {
-        const checks = (u && u.checks) || {};
+
+    // 1대1 매핑: 승인된 리스트를 기준으로 명단 생성
+    crewNames.forEach((crew) => {
+      const approvedUids = approvalLists[crew] || [];
+      approvedUids.forEach((uid) => {
+        const crewNode = crews[crew] || {};
+        const userInCrewNode = (crewNode.users && crewNode.users[uid]) || {};
+        const userChecks = userInCrewNode.checks || {};
         let readChapters = 0;
         let requiredChapters = 0;
         let allCovered = true;
@@ -144,7 +149,7 @@ export default function AdminPage() {
           const portion = portionByCrewAndDate[crew] && portionByCrewAndDate[crew][d];
           if (portion && typeof portion.chapters === 'number') {
             requiredChapters += portion.chapters;
-            if (checks[d]) {
+            if (userChecks[d]) {
               readChapters += portion.chapters;
             } else {
               allCovered = false;
@@ -157,7 +162,7 @@ export default function AdminPage() {
         const state = getTodayCrewState({
           dates,
           todayKey,
-          userChecks: checks,
+          userChecks,
           userDailyActivity: info.dailyActivity || {},
         });
         status[crew].push({
@@ -174,7 +179,7 @@ export default function AdminPage() {
       status[crew].sort((a, b) => b.chapters - a.chapters);
     });
     setCrewStatus(status);
-  }, [crews, users]);
+  }, [crews, users, approvalLists]);
 
 
 
@@ -654,7 +659,13 @@ export default function AdminPage() {
   // - crew가 null이면 미배정
   // - status === 'inactive' 는 비활성(소프트 삭제)로 별도 관리
   const unassignedUsers = Object.entries(users || {})
-    .filter(([uid, u]) => u && !u.crew && (u.status || 'active') !== 'inactive')
+    .filter(([uid, u]) => {
+      if (!u || (u.status || 'active') === 'inactive') return false;
+      // 승인된 명단에 있는지 확인
+      const isApproved = Object.values(approvalLists).some(list => Array.isArray(list) && list.includes(uid));
+      // u.crew가 없고, 이번 달 어떤 반에도 승인되지 않은 사람만 미배정
+      return !u.crew && !isApproved;
+    })
     .map(([uid, u]) => ({ uid, ...u }));
 
   const inactiveUsers = Object.entries(users || {})
@@ -1321,156 +1332,198 @@ export default function AdminPage() {
           boxShadow: '0 4px 10px rgba(0,0,0,0.06)',
         }}
       >
-        <h3 style={{ marginTop: 0, marginBottom: 10 }}>이번 달 크루 달리기 현황</h3>
-        <p style={{ fontSize: 12, marginBottom: 10 }}>
-          오늘 날짜까지 읽어야 할 분량 기준으로 진행률과 성공 여부를 계산합니다.
-        </p>
-        {CREW_KEYS.map((crew) => (
-          <div key={crew} style={{ marginBottom: 16 }}>
-            <h4 style={{ marginBottom: 6 }}>{getCrewLabel(crew)}</h4>
-            {(!crewStatus[crew] || crewStatus[crew].length === 0) && (
-              <p style={{ fontSize: 12, color: '#666' }}>아직 데이터가 없습니다.</p>
-            )}
-            {crewStatus[crew] && crewStatus[crew].length > 0 && (
-              <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
-                <thead>
-                  <tr>
-                    <th style={{ borderBottom: '1px solid #ccc', textAlign: 'left', padding: 4 }}>이름</th>
-                    <th style={{ borderBottom: '1px solid #ccc', textAlign: 'right', padding: 4 }}>읽은 장</th>
-                    <th style={{ borderBottom: '1px solid #ccc', textAlign: 'right', padding: 4 }}>진행률</th>
-                    <th style={{ borderBottom: '1px solid #ccc', textAlign: 'center', padding: 4 }}>상태</th>
-                    <th style={{ borderBottom: '1px solid #ccc', textAlign: 'center', padding: 4 }}>비번 초기화</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {crewStatus[crew].map((u) => (
-                    <tr key={u.uid}>
-                      <td style={{ borderBottom: '1px solid #eee', padding: 4 }}>{u.name}</td>
-                      <td style={{ borderBottom: '1px solid #eee', padding: 4, textAlign: 'right' }}>{u.chapters}</td>
-                      <td style={{ borderBottom: '1px solid #eee', padding: 4, textAlign: 'right' }}>
-                        {u.progress}%
-                      </td>
-                      <td style={{ borderBottom: '1px solid #eee', padding: 4, textAlign: 'center' }}>
-                        {(() => {
-                          const label = u.stateLabel || '🟢 오늘준비';
-                          const key = u.stateKey || '';
-                          const isSuccess = key === 'success' || label.includes('성공');
-                          const isReady = key === 'ready' || label.includes('오늘준비');
-                          const isRunning = key === 'running' || label.includes('러닝');
-                          const isFail = key === 'fail' || label.includes('힘을내!') || key === 'shortage';
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
+          <h3 style={{ margin: 0 }}>이번 달 크루 달리기 현황</h3>
+          <button
+            onClick={() => setShowCrewStatus(!showCrewStatus)}
+            style={{
+              padding: '6px 12px',
+              borderRadius: 8,
+              border: '1px solid #1D3557',
+              background: showCrewStatus ? '#f1f1f1' : '#fff',
+              color: '#1D3557',
+              fontSize: 12,
+              fontWeight: 'bold',
+              cursor: 'pointer',
+            }}
+          >
+            {showCrewStatus ? '🔼 닫기' : '🔽 열기'}
+          </button>
+        </div>
+        {showCrewStatus && (
+          <>
+            <p style={{ fontSize: 12, marginBottom: 10 }}>
+              오늘 날짜까지 읽어야 할 분량 기준으로 진행률과 성공 여부를 계산합니다.
+            </p>
+            {CREW_KEYS.map((crew) => (
+              <div key={crew} style={{ marginBottom: 16 }}>
+                <h4 style={{ marginBottom: 6 }}>{getCrewLabel(crew)}</h4>
+                {(!crewStatus[crew] || crewStatus[crew].length === 0) && (
+                  <p style={{ fontSize: 12, color: '#666' }}>아직 데이터가 없습니다.</p>
+                )}
+                {crewStatus[crew] && crewStatus[crew].length > 0 && (
+                  <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
+                    <thead>
+                      <tr>
+                        <th style={{ borderBottom: '1px solid #ccc', textAlign: 'left', padding: 4 }}>이름</th>
+                        <th style={{ borderBottom: '1px solid #ccc', textAlign: 'right', padding: 4 }}>읽은 장</th>
+                        <th style={{ borderBottom: '1px solid #ccc', textAlign: 'right', padding: 4 }}>진행률</th>
+                        <th style={{ borderBottom: '1px solid #ccc', textAlign: 'center', padding: 4 }}>상태</th>
+                        <th style={{ borderBottom: '1px solid #ccc', textAlign: 'center', padding: 4 }}>비번 초기화</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {crewStatus[crew].map((u) => (
+                        <tr key={u.uid}>
+                          <td style={{ borderBottom: '1px solid #eee', padding: 4 }}>{u.name}</td>
+                          <td style={{ borderBottom: '1px solid #eee', padding: 4, textAlign: 'right' }}>{u.chapters}</td>
+                          <td style={{ borderBottom: '1px solid #eee', padding: 4, textAlign: 'right' }}>
+                            {u.progress}%
+                          </td>
+                          <td style={{ borderBottom: '1px solid #eee', padding: 4, textAlign: 'center' }}>
+                            {(() => {
+                              const label = u.stateLabel || '🟢 오늘준비';
+                              const key = u.stateKey || '';
+                              const isSuccess = key === 'success' || label.includes('성공');
+                              const isReady = key === 'ready' || label.includes('오늘준비');
+                              const isRunning = key === 'running' || label.includes('러닝');
+                              const isFail = key === 'fail' || label.includes('힘을내!') || key === 'shortage';
 
-                          if (isReady) {
-                            return (
-                              <span style={{ color: '#166534', fontWeight: 600 }}>
-                                {label}
-                              </span>
-                            );
-                          }
+                              if (isReady) {
+                                return (
+                                  <span style={{ color: '#166534', fontWeight: 600 }}>
+                                    {label}
+                                  </span>
+                                );
+                              }
 
-                          const style = {
-                            display: 'inline-block',
-                            borderRadius: 8,
-                            padding: '4px 16px',
-                            fontWeight: 600,
-                            backgroundColor: isSuccess
-                              ? '#DCFCE7'
-                              : isRunning
-                                ? '#DBEAFE'
-                                : '#E5E7EB',
-                            color: isSuccess
-                              ? '#166534'
-                              : isRunning
-                                ? '#1D4ED8'
-                                : '#111827',
-                          };
+                              const style = {
+                                display: 'inline-block',
+                                borderRadius: 8,
+                                padding: '4px 16px',
+                                fontWeight: 600,
+                                backgroundColor: isSuccess
+                                  ? '#DCFCE7'
+                                  : isRunning
+                                    ? '#DBEAFE'
+                                    : '#E5E7EB',
+                                color: isSuccess
+                                  ? '#166534'
+                                  : isRunning
+                                    ? '#1D4ED8'
+                                    : '#111827',
+                              };
 
-                          return <span style={style}>{label}</span>;
-                        })()}
-                      </td>
-                      <td style={{ borderBottom: '1px solid #eee', padding: 4, textAlign: 'center' }}>
-                        <button
-                          type='button'
-                          onClick={() => handleConfirmResetPassword(u.uid, u.name)}
-                          style={{
-                            padding: '4px 8px',
-                            borderRadius: 8,
-                            border: 'none',
-                            background: '#8D99AE',
-                            color: '#fff',
-                            fontSize: 11,
-                            cursor: 'pointer',
-                          }}
-                        >
-                          비번 0000
-                        </button>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            )}
-          </div>
-        ))}
+                              return <span style={style}>{label}</span>;
+                            })()}
+                          </td>
+                          <td style={{ borderBottom: '1px solid #eee', padding: 4, textAlign: 'center' }}>
+                            <button
+                              type='button'
+                              onClick={() => handleConfirmResetPassword(u.uid, u.name)}
+                              style={{
+                                padding: '4px 8px',
+                                borderRadius: 8,
+                                border: 'none',
+                                background: '#8D99AE',
+                                color: '#fff',
+                                fontSize: 11,
+                                cursor: 'pointer',
+                              }}
+                            >
+                              비번 0000
+                            </button>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                )}
+              </div>
+            ))}
+          </>
+        )}
 
         {/* 미배정 명단 */}
         <div style={{ marginTop: 16 }}>
-          <h4 style={{ marginBottom: 6 }}>미배정 명단</h4>
-          {(!unassignedUsers || unassignedUsers.length === 0) && (
-            <p style={{ fontSize: 12, color: '#666' }}>미배정 사용자가 없습니다.</p>
-          )}
-          {unassignedUsers && unassignedUsers.length > 0 && (
-            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
-              <thead>
-                <tr>
-                  <th style={{ borderBottom: '1px solid #ccc', textAlign: 'left', padding: 4 }}>이름</th>
-                  <th style={{ borderBottom: '1px solid #ccc', textAlign: 'center', padding: 4 }}>비번 초기화</th>
-                  <th style={{ borderBottom: '1px solid #ccc', textAlign: 'center', padding: 4 }}>삭제</th>
-                </tr>
-              </thead>
-              <tbody>
-                {unassignedUsers.map((u) => (
-                  <tr key={u.uid}>
-                    <td style={{ borderBottom: '1px solid #eee', padding: 4 }}>
-                      {u.name || u.uid}
-                    </td>
-                    <td style={{ borderBottom: '1px solid #eee', padding: 4, textAlign: 'center' }}>
-                      <button
-                        type='button'
-                        onClick={() => handleConfirmResetPassword(u.uid, u.name)}
-                        style={{
-                          padding: '4px 8px',
-                          borderRadius: 8,
-                          border: 'none',
-                          background: '#8D99AE',
-                          color: '#fff',
-                          fontSize: 11,
-                          cursor: 'pointer',
-                        }}
-                      >
-                        비번 0000
-                      </button>
-                    </td>
-                    <td style={{ borderBottom: '1px solid #eee', padding: 4, textAlign: 'center' }}>
-                      <button
-                        type='button'
-                        onClick={() => handleConfirmDeactivate(u.uid, u.name)}
-                        style={{
-                          padding: '4px 8px',
-                          borderRadius: 8,
-                          border: 'none',
-                          background: '#E53935',
-                          color: '#fff',
-                          fontSize: 11,
-                          cursor: 'pointer',
-                        }}
-                      >
-                        삭제
-                      </button>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
+            <h4 style={{ margin: 0 }}>미배정 명단</h4>
+            <button
+              onClick={() => setShowUnassignedUsers(!showUnassignedUsers)}
+              style={{
+                padding: '4px 10px',
+                borderRadius: 8,
+                border: '1px solid #1D3557',
+                background: showUnassignedUsers ? '#f1f1f1' : '#fff',
+                color: '#1D3557',
+                fontSize: 11,
+                fontWeight: 'bold',
+                cursor: 'pointer',
+              }}
+            >
+              {showUnassignedUsers ? '🔼 닫기' : '🔽 열기'}
+            </button>
+          </div>
+          {showUnassignedUsers && (
+            <>
+              {(!unassignedUsers || unassignedUsers.length === 0) && (
+                <p style={{ fontSize: 12, color: '#666' }}>미배정 사용자가 없습니다.</p>
+              )}
+              {unassignedUsers && unassignedUsers.length > 0 && (
+                <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
+                  <thead>
+                    <tr>
+                      <th style={{ borderBottom: '1px solid #ccc', textAlign: 'left', padding: 4 }}>이름</th>
+                      <th style={{ borderBottom: '1px solid #ccc', textAlign: 'center', padding: 4 }}>비번 초기화</th>
+                      <th style={{ borderBottom: '1px solid #ccc', textAlign: 'center', padding: 4 }}>삭제</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {unassignedUsers.map((u) => (
+                      <tr key={u.uid}>
+                        <td style={{ borderBottom: '1px solid #eee', padding: 4 }}>
+                          {u.name || u.uid}
+                        </td>
+                        <td style={{ borderBottom: '1px solid #eee', padding: 4, textAlign: 'center' }}>
+                          <button
+                            type='button'
+                            onClick={() => handleConfirmResetPassword(u.uid, u.name)}
+                            style={{
+                              padding: '4px 8px',
+                              borderRadius: 8,
+                              border: 'none',
+                              background: '#8D99AE',
+                              color: '#fff',
+                              fontSize: 11,
+                              cursor: 'pointer',
+                            }}
+                          >
+                            비번 0000
+                          </button>
+                        </td>
+                        <td style={{ borderBottom: '1px solid #eee', padding: 4, textAlign: 'center' }}>
+                          <button
+                            type='button'
+                            onClick={() => handleConfirmDeactivate(u.uid, u.name)}
+                            style={{
+                              padding: '4px 8px',
+                              borderRadius: 8,
+                              border: 'none',
+                              background: '#E63946',
+                              color: '#fff',
+                              fontSize: 11,
+                              cursor: 'pointer',
+                            }}
+                          >
+                            삭제
+                          </button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              )}
+            </>
           )}
         </div>
       </div>
