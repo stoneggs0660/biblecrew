@@ -1,6 +1,6 @@
 {
-  "name": "biblecrew-v06-ui2",
-  "version": "0.2.1",
+  "name": "auto-application",
+  "version": "0.3.0",
   "type": "module",
   "scripts": {
     "dev": "vite",

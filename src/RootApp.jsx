@@ -32,7 +32,13 @@ export default function RootApp() {
     const trimmed = (name || '').trim();
     if (!trimmed) return null;
     const user = await loginOrRegisterUser(trimmed, password || '');
-    const stored = { uid: user.uid, name: user.name || trimmed, crew: user.crew || null, mustChangePassword: !!user.mustChangePassword };
+    const stored = {
+      uid: user.uid,
+      name: user.name || trimmed,
+      crew: user.crew || null,
+      mustChangePassword: !!user.mustChangePassword,
+      isAdmin: !!user.isAdmin // ✅ 관리자 여부 저장
+    };
     setUser(stored);
     localStorage.setItem('biblecrew_user', JSON.stringify(stored));
     return stored;
@@ -42,7 +48,7 @@ export default function RootApp() {
   return (
     <HashRouter>
       <Routes>
-        <Route path='/admin-login' element={<AdminLogin />} />
+        <Route path='/admin-login' element={<AdminLogin user={user} />} /> {/* ✅ user prop 전달 */}
         <Route path='/' element={<Login onLogin={handleLogin} />} />
         <Route path='/login' element={<Login onLogin={handleLogin} />} />
         <Route path='/home' element={<Home user={user} />} />

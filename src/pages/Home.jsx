@@ -5,7 +5,8 @@ import {
   subscribeToNotice,
   saveNextMonthApplication,
   subscribeToMyNextMonthApplication,
-  cancelNextMonthApplication
+  cancelNextMonthApplication,
+  overwriteNextMonthApplication
 } from '../firebaseSync';
 
 export default function Home({ user }) {
@@ -15,7 +16,6 @@ export default function Home({ user }) {
   const [notice, setNotice] = useState(null);
 
   useEffect(() => {
-    // 모든 반 소감을 통합해서 구독(상한 500개)
     const unsubComments = subscribeToAllComments(setAllComments);
     const unsubNotice = subscribeToNotice(setNotice);
     return () => {
@@ -24,7 +24,6 @@ export default function Home({ user }) {
     };
   }, []);
 
-  // 홈: 기본은 최신 20개, 더보기는 '오늘(00:00~현재)'만 출력
   const baseComments = (allComments || []).slice(0, 20);
   const startOfToday = new Date();
   startOfToday.setHours(0, 0, 0, 0);
@@ -36,20 +35,12 @@ export default function Home({ user }) {
 
   const [showNextForm, setShowNextForm] = useState(false);
   const [nextCrew, setNextCrew] = useState('');
-  const [nextSaved, setNextSaved] = useState(false);
   const [myNextApp, setMyNextApp] = useState(null);
 
   useEffect(() => {
     if (!user || !user.uid) return;
     const unsub = subscribeToMyNextMonthApplication(user.uid, (data) => {
-      setMyNextApp(data);
-      if (data && data.crew) {
-        setNextCrew(data.crew);
-        setNextSaved(true);
-      } else {
-        setNextCrew('');
-        setNextSaved(false);
-      }
+      setMyNextApp(data || {});
     });
     return () => {
       if (typeof unsub === 'function') unsub();
@@ -65,43 +56,27 @@ export default function Home({ user }) {
       alert('신청할 반을 선택해 주세요.');
       return;
     }
-    // 이미 다음 달 신청 내역이 있는 경우: 반드시 취소 후 다시 신청해야 함
-    if (myNextApp && myNextApp.crew) {
-      if (myNextApp.crew !== nextCrew) {
-        alert('이미 다른 반을 신청했습니다. 취소 후 다시 신청해 주세요.');
-        return;
-      }
-      if (myNextApp.crew === nextCrew) {
-        alert(`${nextCrew}에 이미 신청되어 있습니다.`);
-        return;
-      }
-    }
 
-    saveNextMonthApplication(nextCrew, user.uid, user.name || '이름없음').then(() => {
-      setNextSaved(true);
-      alert(`${nextCrew}에 등록완료 되었습니다.`);
-    });
-  }
+    const msg = `정말 '${nextCrew}'(으)로 신청하시겠습니까?\n(기존 신청 내역이 있다면 모두 취소되고 하나만 저장됩니다.)`;
+    if (!window.confirm(msg)) return;
 
-  function handleCancelNextMonth() {
-    if (!user || !user.uid) {
-      alert('로그인 후 취소할 수 있습니다.');
-      return;
-    }
-    if (!myNextApp && !nextSaved) {
-      alert('현재 취소할 신청 내역이 없습니다.');
-      return;
-    }
-    if (!window.confirm('다음 달 크루 신청을 취소하시겠습니까?')) return;
-
-    cancelNextMonthApplication(user.uid).then(() => {
-      setMyNextApp(null);
+    overwriteNextMonthApplication(nextCrew, user.uid, user.name || '이름없음').then(() => {
+      alert(`${nextCrew} 신청이 완료되었습니다.`);
       setNextCrew('');
-      setNextSaved(false);
-      alert('다음 달 크루 신청이 취소되었습니다.');
     });
   }
 
+  function handleCancelAll() {
+    if (!user || !user.uid) return;
+    if (!window.confirm('다음 달 신청 내역을 모두 취소하시겠습니까?')) return;
+
+    cancelNextMonthApplication(user.uid, null).then(() => {
+      alert('취소되었습니다.');
+    });
+  }
+
+  const appliedCrews = Object.keys(myNextApp || {});
+  const hasApplication = appliedCrews.length > 0;
 
   function formatDateTime(ts) {
     if (!ts) return '';
@@ -113,7 +88,6 @@ export default function Home({ user }) {
     const mm = String(d.getMinutes()).padStart(2, '0');
     return `${y}-${m}-${day} ${hh}:${mm}`;
   }
-
 
   return (
     <div
@@ -226,8 +200,9 @@ export default function Home({ user }) {
         >
           <h3 style={{ marginTop: 0, marginBottom: 8 }}>📅 다음달 크루 신청</h3>
           <p style={{ fontSize: 12, color: '#555', marginBottom: 12 }}>
-            다음 달 참여할 크루를 선택해 주세요(매달 마지막 날까지 신청, 현재의 달은 신청할 수 없습니다.)
+            다음 달 참여할 크루를 선택해 주세요. (변경 시 기존 신청은 자동 취소됩니다)
           </p>
+
           <div style={{ display: 'flex', gap: 8, marginBottom: 12 }}>
             <select
               value={nextCrew}
@@ -248,14 +223,11 @@ export default function Home({ user }) {
               <option value="구약파노라마">구약파노라마(9)</option>
               <option value="신약파노라마">신약파노라마(5)</option>
             </select>
-          </div>
-          <div style={{ display: 'flex', gap: 8, marginBottom: 8 }}>
             <button
               type="button"
               onClick={handleSaveNextMonth}
               style={{
-                flex: 1,
-                padding: 10,
+                padding: '0 20px',
                 borderRadius: 8,
                 border: 'none',
                 background: '#0B8457',
@@ -264,33 +236,41 @@ export default function Home({ user }) {
                 cursor: 'pointer',
               }}
             >
-              저장
-            </button>
-            <button
-              type="button"
-              onClick={handleCancelNextMonth}
-              style={{
-                flex: 1,
-                padding: 10,
-                borderRadius: 8,
-                border: '1px solid #ccc',
-                background: '#F5F5F5',
-                color: '#333',
-                fontWeight: 'bold',
-                cursor: 'pointer',
-              }}
-            >
-              취소
+              신청(변경)
             </button>
           </div>
-          {(nextSaved && myNextApp) && (
-            <p style={{ fontSize: 12, color: '#0B8457', marginTop: 4 }}>
-              이미 신청되었습니다.
-            </p>
+
+          {hasApplication ? (
+            <div style={{ marginTop: 16, borderTop: '1px solid #eee', paddingTop: 10 }}>
+              <div style={{ fontSize: 13, fontWeight: 'bold', color: '#333', marginBottom: 6 }}>
+                ✅ 현재 신청된 반
+              </div>
+              <div style={{ marginBottom: 10, color: '#0B8457', fontWeight: 600 }}>
+                {appliedCrews.join(', ')}
+              </div>
+              <button
+                onClick={handleCancelAll}
+                style={{
+                  width: '100%',
+                  padding: '10px',
+                  borderRadius: 8,
+                  border: '1px solid #ccc',
+                  background: '#f5f5f5',
+                  color: '#333',
+                  cursor: 'pointer',
+                  fontWeight: 'bold'
+                }}
+              >
+                신청 취소하기
+              </button>
+            </div>
+          ) : (
+            <div style={{ fontSize: 13, color: '#999', marginTop: 10 }}>
+              신청 내역이 없습니다.
+            </div>
           )}
         </div>
       )}
-
 
       <div
         style={{
@@ -316,7 +296,6 @@ export default function Home({ user }) {
           </div>
         )}
 
-        {/* 👥 이번 달 크루원 보기 */}
         <button
           style={{
             ...btnStyle('#1E7F74'),
@@ -380,11 +359,11 @@ export default function Home({ user }) {
 function btnStyle(bg) {
   return {
     width: '100%',
-    height: 63, // 고정 높이 63으로 조정
-    padding: '0 6px', // 세로 패딩 제거 (Flex 정렬 사용)
+    height: 63,
+    padding: '0 6px',
     borderRadius: 12,
     border: 'none',
-    fontSize: 17, // 글자 크기 약간 조정 (두 줄 처리를 위해)
+    fontSize: 17,
     fontWeight: 'bold',
     background: bg,
     color: '#fff',

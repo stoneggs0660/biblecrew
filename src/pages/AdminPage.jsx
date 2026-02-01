@@ -14,18 +14,15 @@ import {
   subscribeToMonthlyHallOfFame,
   saveMonthlyHallOfFame,
   getCurrentYMKey,
-  subscribeToCrewApprovals,
-  addCrewApprovalName,
-  addCrewApprovalNames,
-  approveNextMonthApplicant,
-  approveAllNextMonthApplicants,
-  getNextYMKey,
-  clearCrewApprovals,
-  resetUserPassword,
-  updateAdminPassword,
+  subscribeToCrewApprovals, // Restored
+  getNextYMKey, // Restored
+  resetUserPassword, // Restored
+  updateAdminPassword, // Restored
   subscribeToNotice,
   saveNotice,
-  subscribeToNextMonthApplications,
+  subscribeToNextMonthApplications, // Restored for legacy
+  approveAllNextMonthApplicants, // Restored for legacy
+  normalizeNameForKey, // ✅ Added
   getRecentApplicationMonths,
   fetchApplicationsByMonth,
   adminSetMonthlyUserMedal,
@@ -38,7 +35,16 @@ import {
   getMonthlyReportMonths,
   fetchMonthlyReport,
   getYearlyHallOfFame,
+  saveNextMonthApplication,
+  cancelNextMonthApplication, // ✅ 취소 함수 추가
+  addManualApprovalWithHistory, // ✅ 히스토리 포함 수동 승인
+  clearCrewApprovals, // ✅ Added missing import
+  setAdminStatus, // 추가
+  applyMonthlyAssignments, // 추가
+  subscribeToAssignmentStatus, // 추가
+  fetchAssignmentSnapshot, // 추가
 } from '../firebaseSync';
+import { checkContentOverlap, getOverlappingBooks } from '../utils/crewOverlapUtils'; // ✅ 중복 체크 추가
 import { calculateMonthlyRankingForMonth } from '../utils/rankingUtils';
 import { getMonthDates } from '../utils/dateUtils';
 import { getDailyBiblePortionByCrew } from '../utils/bibleUtils';
@@ -74,7 +80,12 @@ export default function AdminPage() {
     중급반: [],
     초급반: [],
   });
-  const [nextMonthApps, setNextMonthApps] = useState({});
+  const [nextApprovalLists, setNextApprovalLists] = useState({
+    고급반: [],
+    중급반: [],
+    초급반: [],
+  });
+  const [nextMonthApps, setNextMonthApps] = useState({}); // Legacy support
   const [historyMonths, setHistoryMonths] = useState([]);
   const [selectedHistoryMonth, setSelectedHistoryMonth] = useState('');
   const [historyApps, setHistoryApps] = useState({});
@@ -94,6 +105,10 @@ export default function AdminPage() {
   const [reportData, setReportData] = useState(null);
   const [reportLoading, setReportLoading] = useState(false);
 
+  // 수동 배정 상태
+  const [manualEnrollName, setManualEnrollName] = useState('');
+  const [manualEnrollCrew, setManualEnrollCrew] = useState('');
+
   const [yearlyData, setYearlyData] = useState([]);
   const [yearlyLoading, setYearlyLoading] = useState(false);
   const [yearlyFilter, setYearlyFilter] = useState('all'); // all, full, advanced, intermediate...
@@ -103,6 +118,8 @@ export default function AdminPage() {
   const [showYearlyReport, setShowYearlyReport] = useState(false);
   const [showCrewStatus, setShowCrewStatus] = useState(false);
   const [showUnassignedUsers, setShowUnassignedUsers] = useState(false);
+  const [appliedAt, setAppliedAt] = useState(null); // 이번 달 배정 적용 시간
+  const [startMonthLoading, setStartMonthLoading] = useState(false);
 
   const checksUnsubRef = useRef(null);
 
@@ -135,51 +152,87 @@ export default function AdminPage() {
       status[c] = [];
     });
 
-    // 1대1 매핑: 승인된 리스트를 기준으로 명단 생성
-    crewNames.forEach((crew) => {
+    // 1. 자동 동기화 & 명단 집계 (승인 명단 <-> DB crew 동기화)
+    const combinedStatus = {};
+    CREW_KEYS.forEach((c) => (combinedStatus[c] = []));
+
+    // 중복 방지를 위한 Set
+    const processedUids = new Set();
+
+    // (1) 승인 명단(approvalLists) 기준 순회 -> "승인된 사람은 무조건 해당 반 소속이어야 함"
+    CREW_KEYS.forEach((crew) => {
       const approvedUids = approvalLists[crew] || [];
       approvedUids.forEach((uid) => {
-        const crewNode = crews[crew] || {};
-        const userInCrewNode = (crewNode.users && crewNode.users[uid]) || {};
-        const userChecks = userInCrewNode.checks || {};
-        let readChapters = 0;
-        let requiredChapters = 0;
-        let allCovered = true;
-        uptoDates.forEach((d) => {
-          const portion = portionByCrewAndDate[crew] && portionByCrewAndDate[crew][d];
-          if (portion && typeof portion.chapters === 'number') {
-            requiredChapters += portion.chapters;
-            if (userChecks[d]) {
-              readChapters += portion.chapters;
-            } else {
-              allCovered = false;
-            }
-          }
-        });
-        const info = users && users[uid] ? users[uid] : {};
-        const name = info.name || uid;
-        const progress = requiredChapters > 0 ? Math.round((readChapters / requiredChapters) * 100) : 0;
-        const state = getTodayCrewState({
-          dates,
-          todayKey,
-          userChecks,
-          userDailyActivity: info.dailyActivity || {},
-        });
-        status[crew].push({
-          uid,
-          name,
-          chapters: readChapters,
-          progress,
-          stateKey: state.key,
-          stateLabel: state.label,
-        });
+        const userInfo = users[uid];
+        // ✅ [수정] 자동 동기화 제거 (관리자가 버튼 누를 때만 업데이트됨)
+        /*
+        if (userInfo && userInfo.crew !== crew) {
+          updateCrew(uid, crew);
+        }
+        */
+
+        // 리스트에 추가
+        processedUids.add(uid); // 처리됨 표시
+        addToStatusList(crew, uid, users, crews, portionByCrewAndDate, uptoDates, dates, todayKey, combinedStatus);
       });
     });
-    Object.keys(status).forEach((crew) => {
-      status[crew].sort((a, b) => b.chapters - a.chapters);
+
+    // (2) DB crew 기준 순회 -> "승인 명단엔 없어도, 소속이 되어 있는 사람도 표시" (기존 배정자 등)
+    Object.entries(users || {}).forEach(([uid, info]) => {
+      if (processedUids.has(uid)) return; // 이미 위에서 처리된 사람은 패스
+
+      const userCrew = info.crew;
+      if (userCrew && CREW_KEYS.includes(userCrew)) {
+        // 이 사람은 승인명단엔 없지만, crew정보가 살아있으므로 표시
+        addToStatusList(userCrew, uid, users, crews, portionByCrewAndDate, uptoDates, dates, todayKey, combinedStatus);
+      }
     });
-    setCrewStatus(status);
+
+    // 정렬
+    Object.keys(combinedStatus).forEach((crew) => {
+      combinedStatus[crew].sort((a, b) => b.chapters - a.chapters);
+    });
+    setCrewStatus(combinedStatus);
   }, [crews, users, approvalLists]);
+
+  // 헬퍼 함수: 상태 리스트에 항목 추가
+  function addToStatusList(crew, uid, users, crews, portionByCrewAndDate, uptoDates, dates, todayKey, targetStatusObj) {
+    const crewNode = crews[crew] || {};
+    const userInCrewNode = (crewNode.users && crewNode.users[uid]) || {};
+    const userChecks = userInCrewNode.checks || {};
+
+    let readChapters = 0;
+    let requiredChapters = 0;
+
+    uptoDates.forEach((d) => {
+      const portion = portionByCrewAndDate[crew] && portionByCrewAndDate[crew][d];
+      if (portion && typeof portion.chapters === 'number') {
+        requiredChapters += portion.chapters;
+        if (userChecks[d]) {
+          readChapters += portion.chapters;
+        }
+      }
+    });
+
+    const info = users && users[uid] ? users[uid] : {};
+    const name = info.name || uid;
+    const progress = requiredChapters > 0 ? Math.round((readChapters / requiredChapters) * 100) : 0;
+    const state = getTodayCrewState({
+      dates,
+      todayKey,
+      userChecks,
+      userDailyActivity: info.dailyActivity || {},
+    });
+
+    targetStatusObj[crew].push({
+      uid,
+      name,
+      chapters: readChapters,
+      progress,
+      stateKey: state.key,
+      stateLabel: state.label,
+    });
+  }
 
 
 
@@ -197,60 +250,55 @@ export default function AdminPage() {
     };
   }, []);
 
+
   useEffect(() => {
+    // [Legacy Check] 구버전 앱에서 신청한 대기자 확인
     const unsub = subscribeToNextMonthApplications((data) => {
       setNextMonthApps(data || {});
     });
     return () => {
       if (typeof unsub === 'function') unsub();
     };
-  }, [])
-  useEffect(() => {
-    // 관리자 모드 진입 시 최근 3개월 신청 기록 로드 및 오래된 기록 정리
-    async function loadHistory() {
-      try {
-        const months = await getRecentApplicationMonths(3);
-        setHistoryMonths(months || []);
-        setHistoryError('');
+  }, []);
 
-        if (months && months.length > 0) {
-          const initial = months[0];
-          setSelectedHistoryMonth(initial);
-          setHistoryLoading(true);
-          const data = await fetchApplicationsByMonth(initial);
-          setHistoryApps(data || {});
-        } else {
-          setSelectedHistoryMonth('');
-          setHistoryApps({});
-        }
+  useEffect(() => {
+    // [5]번 섹션용: 이번 달 기초 배정 스냅샷 로드
+    async function loadSnapshot() {
+      if (!ymKey) return;
+      setHistoryLoading(true);
+      try {
+        const data = await fetchAssignmentSnapshot(ymKey);
+        setHistoryApps(data || {});
       } catch (err) {
-        console.error('신청 기록 로드 오류', err);
-        setHistoryError('신청 기록을 불러오는 중 오류가 발생했습니다.');
+        console.error('스냅샷 로드 오류', err);
       } finally {
         setHistoryLoading(false);
       }
     }
+    loadSnapshot();
+  }, [ymKey, appliedAt]); // 배정 적용 시점(appliedAt)이 바뀌면 다시 로드
 
-    loadHistory();
-  }, []);
 
-  async function handleChangeHistoryMonth(e) {
-    const ym = e.target.value;
-    setSelectedHistoryMonth(ym);
-    if (!ym) {
-      setHistoryApps({});
-      return;
-    }
-    setHistoryLoading(true);
-    setHistoryError('');
+
+  // 이번 달 배정 여부 구독
+  useEffect(() => {
+    const unsub = subscribeToAssignmentStatus(ymKey, setAppliedAt);
+    return () => { if (unsub) unsub(); };
+  }, [ymKey]);
+
+  // 반 배정 적용 핸들러
+  async function handleApplyAssignments(targetYm, list) {
+    if (!window.confirm(`${targetYm} 반 배정을 최종 적용하시겠습니까?\n(모든 멤버의 개인 소속 정보가 업데이트되며, 시작 명단이 기록됩니다.)`)) return;
+
+    setStartMonthLoading(true);
     try {
-      const data = await fetchApplicationsByMonth(ym);
-      setHistoryApps(data || {});
-    } catch (err) {
-      console.error('신청 기록 로드 오류', err);
-      setHistoryError('신청 기록을 불러오는 중 오류가 발생했습니다.');
+      await applyMonthlyAssignments(targetYm, list);
+      alert(`${targetYm} 반 배정이 성공적으로 적용되었습니다.`);
+    } catch (e) {
+      console.error(e);
+      alert('배정 적용 중 오류가 발생했습니다.');
     } finally {
-      setHistoryLoading(false);
+      setStartMonthLoading(false);
     }
   }
 
@@ -311,6 +359,26 @@ export default function AdminPage() {
     };
   }, [ymKey]);
 
+  useEffect(() => {
+    const crewsForApproval = CREW_KEYS;
+    const unsubs = [];
+    crewsForApproval.forEach((crew) => {
+      const unsub = subscribeToCrewApprovals(crew, nextYmKey, (data) => {
+        const names = data ? Object.keys(data) : [];
+        setNextApprovalLists((prev) => ({
+          ...prev,
+          [crew]: names,
+        }));
+      });
+      if (typeof unsub === 'function') unsubs.push(unsub);
+    });
+    return () => {
+      unsubs.forEach((fn) => {
+        try { fn(); } catch (e) { }
+      });
+    };
+  }, [nextYmKey]);
+
 
 
   const userList = Object.entries(users || {}).map(([uid, u]) => ({
@@ -320,14 +388,26 @@ export default function AdminPage() {
 
 
   function handleAddApproval(crew) {
-    const input = (approvalInput[crew] || '').trim();
-    if (!input) return;
+    const raw = (approvalInput[crew] || '').toString();
+    // 쉼표, 줄바꿈, 공백 등으로 분리
+    const names = raw.split(/[,,\s]+/).map((n) => n.trim()).filter(Boolean);
 
-    // 여러 이름(띄어쓰기/줄바꿈) 한번에 추가 가능
-    addCrewApprovalNames(crew, ymKey, input).then(() => {
+    if (names.length === 0) return;
+
+    // 이름으로 UID 찾기 (히스토리 저장을 위해)
+    const userList = names.map((n) => {
+      // 이름이 정확히 일치하는 사용자 찾기
+      const entry = Object.entries(users || {}).find(([_, u]) => u.name === n);
+      return { name: n, uid: entry ? entry[0] : null };
+    });
+
+    // 히스토리와 함께 저장
+    addManualApprovalWithHistory(crew, ymKey, userList).then(() => {
       setApprovalInput((prev) => ({ ...prev, [crew]: '' }));
     });
   }
+
+
 
 
   function handleSetApprovalMode(crew, mode) {
@@ -341,9 +421,26 @@ export default function AdminPage() {
       });
   }
 
-  function handleClearApproval(crew) {
-    if (!window.confirm(`${crew} 승인 목록을 모두 삭제하시겠습니까? (이번 달 승인 정보만 삭제됩니다.)`)) return;
-    clearCrewApprovals(crew, ymKey);
+  async function handleClearApproval(crew) {
+    if (!window.confirm(`${crew} 승인 목록을 모두 삭제하시겠습니까? (멤버들은 미배정 상태가 됩니다.)`)) return;
+
+    try {
+      // 1. 해당 반의 승인 멤버들 가져오기
+      const targetUids = approvalLists[crew] || [];
+
+      // 2. 멤버들의 'crew' 정보를 null(미배정)로 초기화
+      // (비동기 병렬 처리)
+      const promises = targetUids.map(uid => updateCrew(uid, null));
+      await Promise.all(promises);
+
+      // 3. 승인 목록 삭제
+      await clearCrewApprovals(crew, ymKey);
+
+      alert(`${crew} 승인 목록이 초기화되고, 해당 멤버들은 미배정 상태로 변경되었습니다.`);
+    } catch (e) {
+      console.error(e);
+      alert('초기화 중 오류가 발생했습니다.');
+    }
   }
 
   function handleSelectUser(uid) {
@@ -476,8 +573,32 @@ export default function AdminPage() {
       alert('지난달 집계할 데이터가 없습니다.');
       return;
     }
-    saveMonthlyHallOfFame(year, month, ranking).then(() => {
-      alert(`${year}년 ${month}월 명예의 전당이 확정되었습니다.`);
+
+    // 1. 명예의 전당 저장
+    const p1 = saveMonthlyHallOfFame(year, month, ranking);
+
+    // 2. 월별 결과 보고서 데이터 생성 및 저장
+    const reportPayload = {};
+    ranking.forEach((r) => {
+      const userMedals = users[r.uid]?.medals || {};
+      const totalMedalsCount = (userMedals.gold || 0) + (userMedals.silver || 0) + (userMedals.bronze || 0);
+
+      reportPayload[r.uid] = {
+        uid: r.uid,
+        name: r.name,
+        crew: r.crew,
+        chapters: r.chapters,
+        progress: 100, // 완주 데이터 기준이므로 100(%) 혹은 실제 계산값
+        stateLabel: r.medal ? '성공' : '실패',
+        totalMedals: totalMedalsCount
+      };
+    });
+    const p2 = saveMonthlyReport(year, month, reportPayload);
+
+    Promise.all([p1, p2]).then(() => {
+      alert(`${year}년 ${month}월 명예의 전당 및 결과 보고서가 확정되었습니다.`);
+      // 보고서 목록 아카이브 갱신
+      getMonthlyReportMonths().then(setReportMonths);
     });
   }
 
@@ -672,6 +793,110 @@ export default function AdminPage() {
     .filter(([uid, u]) => u && (u.status || '') === 'inactive')
     .map(([uid, u]) => ({ uid, ...u }));
 
+  // ✅ 수동 배정 핸들러
+  async function handleManualEnroll() {
+    if (!manualEnrollName || !manualEnrollCrew) {
+      alert('이름과 반을 모두 입력해 주세요.');
+      return;
+    }
+    // 이름으로 UID 찾기
+    const found = Object.entries(users).find(([uid, u]) => (u.name || '').trim() === manualEnrollName.trim());
+    if (!found) {
+      alert('해당 이름의 사용자를 찾을 수 없습니다. (정확한 이름을 입력해 주세요)');
+      return;
+    }
+    const [uid, userObj] = found;
+
+    // 관리자 모드: 중복/규칙 체크 없이 무조건 등록 (사용자 요청)
+    // 단, 동일 반 중복은 의미 없으므로 알림만 줄 수도 있으나, "특별히 조건없이"라고 했으므로 
+    // 그냥 saveNextMonthApplication 호출하면 덮어써짐.
+
+    if (!window.confirm(`${manualEnrollName} 님을 ${getCrewLabel(manualEnrollCrew)}에 수동 신청 등록하시겠습니까?`)) return;
+
+    try {
+      await saveNextMonthApplication(manualEnrollCrew, uid, userObj.name);
+      alert('신청 등록되었습니다. 아래 목록에서 필요 시 승인 처리를 해주세요.');
+      setManualEnrollName('');
+      setManualEnrollCrew('');
+    } catch (e) {
+      console.error(e);
+      alert('오류가 발생했습니다: ' + (e.message || e));
+    }
+  }
+
+  // ✅ 수동 취소 핸들러 (스마트 감지)
+  async function handleManualCancel() {
+    if (!manualEnrollName) {
+      alert('이름을 입력해 주세요.');
+      return;
+    }
+    const cleanInputName = (manualEnrollName || '').trim();
+
+    // 이름으로 UID 찾기
+    const found = Object.entries(users).find(([uid, u]) => (u.name || '').trim() === cleanInputName);
+    if (!found) {
+      alert('해당 이름의 사용자를 찾을 수 없습니다.');
+      return;
+    }
+    const [uid, userObj] = found;
+    const cleanStoredName = normalizeNameForKey(userObj.name);
+
+    // 사용자가 신청한(배정된) 반 자동 검색
+    let targetCrew = manualEnrollCrew; // 기본은 선택값
+    let detectedInfo = '';
+
+    // 1. 승인 목록에서 검색
+    for (const [crewKey, list] of Object.entries(nextApprovalLists)) {
+      if (Array.isArray(list) && list.some(n => normalizeNameForKey(n) === cleanStoredName)) {
+        targetCrew = crewKey;
+        detectedInfo = '(승인된 내역)';
+        break;
+      }
+    }
+
+    // 2. 대기 목록에서 검색 (승인 목록에 없으면)
+    if (!detectedInfo && nextMonthApps) {
+      for (const [crewKey, node] of Object.entries(nextMonthApps)) {
+        if (node && node[uid]) {
+          targetCrew = crewKey;
+          detectedInfo = '(신청 대기 내역)';
+          break;
+        }
+      }
+    }
+
+    if (!targetCrew) {
+      alert('해당 사용자의 신청/승인 내역을 찾을 수 없습니다.');
+      return;
+    }
+
+    const label = getCrewLabel(targetCrew);
+    if (!window.confirm(`${manualEnrollName} 님의 ${label} 신청을 취소하시겠습니까? ${detectedInfo}`)) return;
+
+    try {
+      await cancelNextMonthApplication(uid, targetCrew);
+      alert('취소되었습니다.');
+      setManualEnrollName('');
+      setManualEnrollCrew('');
+    } catch (e) {
+      console.error(e);
+      alert('오류가 발생했습니다: ' + (e.message || e));
+    }
+  }
+
+  async function handleToggleAdmin(uid, name, currentStatus) {
+    const action = currentStatus ? '해제' : '지정';
+    if (!window.confirm(`${name}님을 관리자로 ${action} 하시겠습니까?\n(지정되면 비번 없이 관리자 페이지에 접속 가능합니다.)`)) return;
+
+    try {
+      await setAdminStatus(uid, !currentStatus);
+      alert(`${name}님이 관리자로 ${action} 되었습니다.`);
+    } catch (e) {
+      console.error(e);
+      alert('오류가 발생했습니다.');
+    }
+  }
+
   return (
     <div style={{ padding: 20, minHeight: '100vh', background: '#F1FAEE' }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
@@ -695,7 +920,7 @@ export default function AdminPage() {
       </div>
       <p style={{ marginBottom: 20 }}>사용자 반 배정, 체크 수정, 소감/명예의 전당 관리를 할 수 있습니다.</p>
 
-      {/* 반 안내팝업 전용 편집 페이지 */}
+
       <div style={{ marginBottom: 18 }}>
         <button
           type='button'
@@ -725,7 +950,7 @@ export default function AdminPage() {
           boxShadow: '0 4px 12px rgba(0,0,0,0.04)',
         }}
       >
-        <h3 style={{ marginBottom: 8, color: '#1D3557' }}>앱 기본 설정</h3>
+        <h3 style={{ marginBottom: 8, color: '#1D3557' }}>[1] 앱 기본 설정</h3>
         <div style={{ marginBottom: 8 }}>
           <label style={{ fontSize: 13, display: 'block', marginBottom: 4 }}>교회 이름</label>
           <div style={{ display: 'flex', gap: 8 }}>
@@ -894,7 +1119,7 @@ export default function AdminPage() {
           boxShadow: '0 4px 12px rgba(0,0,0,0.04)',
         }}
       >
-        <h3 style={{ marginBottom: 8, color: '#1D3557' }}>승인 관리</h3>
+        <h3 style={{ marginBottom: 8, color: '#1D3557' }}>[2] 승인 관리</h3>
         <p style={{ fontSize: 12, marginBottom: 12, color: '#555' }}>
           이번 달 각 반에 참여할 인원을 등록합니다. 승인된 사람만 해당 반 페이지로 입장할 수 있습니다.
         </p>
@@ -1070,7 +1295,7 @@ export default function AdminPage() {
         </div>
       </div>
 
-      {/* 다음 달 크루 신청자 목록 */}
+      {/* 다음 달 수동 배정 */}
       <div
         style={{
           marginBottom: 20,
@@ -1080,103 +1305,118 @@ export default function AdminPage() {
           boxShadow: '0 4px 12px rgba(0,0,0,0.04)',
         }}
       >
-        <h3 style={{ marginBottom: 8, color: '#1D3557' }}>다음 달 크루 신청자 목록</h3>
+        <h3 style={{ marginBottom: 8, color: '#1D3557' }}>[3] 다음 달 반 수동 신청 등록</h3>
         <p style={{ fontSize: 12, marginBottom: 12, color: '#555' }}>
-          다음 달에 신청된 크루 명단입니다. <strong>관리자는 명단을 수동 승인 하시기 바랍니다.</strong>
+          관리자가 직접 사용자를 다음 달 반 신청 명단에 추가합니다. (등록 후 아래 목록에서 승인 필요)
+        </p>
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+          <input
+            placeholder="이름 입력"
+            value={manualEnrollName}
+            onChange={(e) => setManualEnrollName(e.target.value)}
+            style={{ padding: 8, borderRadius: 6, border: '1px solid #ccc' }}
+          />
+          <select
+            value={manualEnrollCrew}
+            onChange={(e) => setManualEnrollCrew(e.target.value)}
+            style={{ padding: 8, borderRadius: 6, border: '1px solid #ccc' }}
+          >
+            <option value="">반 선택</option>
+            {CREW_KEYS.map(k => (
+              <option key={k} value={k}>{getCrewLabel(k)}</option>
+            ))}
+          </select>
+          <button
+            onClick={handleManualEnroll}
+            style={{
+              padding: '8px 16px',
+              borderRadius: 6,
+              border: 'none',
+              background: '#0B8457',
+              color: '#fff',
+              fontWeight: 'bold',
+              cursor: 'pointer',
+            }}
+          >
+            등록
+          </button>
+          <button
+            onClick={handleManualCancel}
+            style={{
+              padding: '8px 16px',
+              borderRadius: 6,
+              border: '1px solid #D32F2F',
+              background: '#fff',
+              color: '#D32F2F',
+              fontWeight: 'bold',
+              cursor: 'pointer',
+            }}
+          >
+            취소
+          </button>
+        </div>
+      </div>
+
+      <div
+        style={{
+          marginBottom: 20,
+          padding: 16,
+          borderRadius: 12,
+          background: '#FFFFFF',
+          boxShadow: '0 4px 12px rgba(0,0,0,0.04)',
+          borderLeft: '5px solid #2E7D32'
+        }}
+      >
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
+          <h3 style={{ margin: 0, color: '#1D3557' }}>[4] 다음 달 승인 확정 명단 ({nextYmKey})</h3>
+
+          {/* ✅ 새 달 시작 버튼 (자정 지나면 활성화) */}
+          {(() => {
+            const now = new Date();
+            const nowYM = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+            const targetYM = nextYmKey;
+            const isReady = nowYM >= targetYM; // 자정 지나서 해당 월이 되었거나 그 이후
+
+            return (
+              <button
+                onClick={() => handleApplyAssignments(nextYmKey, nextApprovalLists)}
+                disabled={!isReady || startMonthLoading}
+                style={{
+                  padding: '8px 16px',
+                  borderRadius: 8,
+                  border: 'none',
+                  background: isReady ? '#2E7D32' : '#ccc',
+                  color: '#fff',
+                  fontWeight: 'bold',
+                  cursor: isReady ? 'pointer' : 'not-allowed',
+                  fontSize: 13
+                }}
+              >
+                {startMonthLoading ? '처리 중...' : `[${nextYmKey}] 반 배정 적용 (새 달 시작)`}
+              </button>
+            );
+          })()}
+        </div>
+
+        <p style={{ fontSize: 12, color: '#666', marginBottom: 12 }}>
+          다음 달 반 배정이 확정된 인원입니다. <strong>{nextYmKey} 1일 자정 이후</strong> 버튼을 눌러 실제 배정을 적용할 수 있습니다.
         </p>
 
         {CREW_KEYS.map((crew) => {
-          const crewNode = (nextMonthApps && nextMonthApps[crew]) || {};
-          const entries = Object.entries(crewNode || {})
-            .map(([k, v]) => ({ key: k, name: (v && v.name) || k }))
-            .filter((it) => it.name && it.name.toString().trim().length > 0);
-
-          const displayNames = entries.map((it) => (it.name || '').toString().trim()).filter(Boolean);
-
-          async function handleApproveOne(appKey) {
-            try {
-              await approveNextMonthApplicant(nextYmKey, crew, appKey);
-            } catch (err) {
-              alert(err && err.message ? err.message : '승인 처리 중 오류가 발생했습니다.');
-            }
-          }
-
-          async function handleApproveAll() {
-            try {
-              await approveAllNextMonthApplicants(nextYmKey, crew);
-            } catch (err) {
-              alert(err && err.message ? err.message : '전체 승인 처리 중 오류가 발생했습니다.');
-            }
-          }
-
+          const list = nextApprovalLists[crew] || [];
+          if (list.length === 0) return null;
           return (
-            <div key={crew} style={{ marginBottom: 12, fontSize: 13 }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
-                <div style={{ fontWeight: 'bold' }}>{getCrewLabel(crew)}</div>
-
-                <button
-                  type='button'
-                  onClick={handleApproveAll}
-                  disabled={entries.length === 0}
-                  style={{
-                    padding: '4px 10px',
-                    borderRadius: 8,
-                    border: '1px solid #2a9d8f',
-                    background: entries.length === 0 ? '#f3f3f3' : '#2a9d8f',
-                    color: entries.length === 0 ? '#999' : '#fff',
-                    cursor: entries.length === 0 ? 'not-allowed' : 'pointer',
-                    fontSize: 12,
-                  }}
-                  title='현재 목록에 있는 신청자를 모두 승인합니다.'
-                >
-                  전체 승인
-                </button>
-              </div>
-
-              {entries.length === 0 && <div style={{ color: '#777' }}>신청자가 없습니다.</div>}
-
-              {entries.length > 0 && (
-                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
-                  {entries.map((it) => (
-                    <div
-                      key={it.key}
-                      style={{
-                        display: 'inline-flex',
-                        alignItems: 'center',
-                        gap: 6,
-                        padding: '4px 8px',
-                        border: '1px solid #ddd',
-                        borderRadius: 999,
-                        background: '#fafafa',
-                      }}
-                    >
-                      <span>{(it.name || '').toString().trim()}</span>
-                      <button
-                        type='button'
-                        onClick={() => handleApproveOne(it.key)}
-                        style={{
-                          padding: '2px 8px',
-                          borderRadius: 999,
-                          border: '1px solid #457B9D',
-                          background: '#457B9D',
-                          color: '#fff',
-                          fontSize: 11,
-                          cursor: 'pointer',
-                        }}
-                        title='이 신청자만 승인합니다.'
-                      >
-                        승인
-                      </button>
-                    </div>
-                  ))}
-                </div>
-              )}
+            <div key={crew} style={{ marginBottom: 10, fontSize: 13 }}>
+              <span style={{ fontWeight: 'bold', marginRight: 8 }}>{getCrewLabel(crew)}:</span>
+              <span style={{ color: '#333' }}>{list.join(', ')}</span>
             </div>
           );
         })}
+        {Object.values(nextApprovalLists).every(l => l.length === 0) && (
+          <div style={{ fontSize: 12, color: '#999' }}>아직 승인된 인원이 없습니다.</div>
+        )}
       </div>
 
-      {/* 지난달 및 최근 신청자 기록 (최대 3개월) */}
       <div
         style={{
           marginBottom: 20,
@@ -1186,68 +1426,42 @@ export default function AdminPage() {
           boxShadow: '0 4px 12px rgba(0,0,0,0.04)',
         }}
       >
-        <h3 style={{ marginBottom: 8, color: '#1D3557' }}>지난달 신청자 기록 (최근 3개월)</h3>
+        <h3 style={{ marginBottom: 8, color: '#1D3557' }}>[5] 이번 달 기초 배정 기록 ({ymKey})</h3>
         <p style={{ fontSize: 12, marginBottom: 12, color: '#555' }}>
-          지난 달까지 신청되었던 크루 명단을 확인할 수 있습니다. <strong>최대 최근 3개월까지만 보관됩니다.</strong>
+          이번 달 시작 시점에 [4]번 섹션에서 배정 완료 버튼을 눌러 승인되었던 기초 명단입니다.
+          (현재 명단([2]번)과 대조하여 변경 사항을 확인할 수 있습니다.)
         </p>
 
-        {historyMonths.length === 0 && (
-          <div style={{ fontSize: 13, color: '#777' }}>
-            최근 3개월 이내 신청 기록이 없습니다.
-          </div>
-        )}
-
-        {historyMonths.length > 0 && (
-          <>
-            <div style={{ marginBottom: 8, display: 'flex', alignItems: 'center', gap: 8 }}>
-              <span style={{ fontSize: 13 }}>조회할 달 선택:</span>
-              <select
-                value={selectedHistoryMonth}
-                onChange={handleChangeHistoryMonth}
-                style={{
-                  padding: '4px 8px',
-                  borderRadius: 6,
-                  border: '1px solid #ccc',
-                  fontSize: 13,
-                }}
-              >
-                {historyMonths.map((ym) => (
-                  <option key={ym} value={ym}>
-                    {ym}
-                  </option>
-                ))}
-              </select>
+        {appliedAt ? (
+          <div>
+            <div style={{ fontSize: 11, color: '#2E7D32', marginBottom: 10 }}>
+              ✅ 적용 일시: {new Date(appliedAt).toLocaleString()}
             </div>
+            {CREW_KEYS.map((crew) => {
+              // historyApps에 snapshot 데이터가 로드된다고 가정 (fetchApplicationsByMonth 수정함)
+              const list = historyApps[crew] || [];
+              const currentList = approvalLists[crew] || [];
 
-            {historyLoading && (
-              <div style={{ fontSize: 12, color: '#777' }}>불러오는 중...</div>
-            )}
-
-            {historyError && (
-              <div style={{ fontSize: 12, color: '#E63946' }}>{historyError}</div>
-            )}
-
-            {!historyLoading && !historyError && selectedHistoryMonth && (
-              <div style={{ marginTop: 8 }}>
-                {CREW_KEYS.map((crew) => {
-                  const crewNode = (historyApps && historyApps[crew]) || {};
-                  const names = Object.values(crewNode || {})
-                    .map((v) => v && v.name)
-                    .filter((n) => n && n.trim().length > 0);
-
-                  return (
-                    <div key={crew} style={{ marginBottom: 8, fontSize: 13 }}>
-                      <div style={{ fontWeight: 'bold', marginBottom: 4 }}>{getCrewLabel(crew)}</div>
-                      {names.length === 0 && (
-                        <div style={{ color: '#777' }}>신청자가 없습니다.</div>
-                      )}
-                      {names.length > 0 && <div>{names.join(', ')}</div>}
+              return (
+                <div key={crew} style={{ marginBottom: 10, fontSize: 13 }}>
+                  <div style={{ fontWeight: 'bold', borderBottom: '1px solid #eee', paddingBottom: 2 }}>{getCrewLabel(crew)} (최초 {list.length}명)</div>
+                  <div style={{ color: '#666', marginTop: 4 }}>
+                    {list.length === 0 ? "초기 명단 없음" : list.join(', ')}
+                  </div>
+                  {/* 대조 힌트 */}
+                  {list.length !== currentList.length && (
+                    <div style={{ fontSize: 11, color: '#E63946', marginTop: 2 }}>
+                      ※ 현재 {currentList.length}명으로 변동됨
                     </div>
-                  );
-                })}
-              </div>
-            )}
-          </>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        ) : (
+          <div style={{ fontSize: 13, color: '#777' }}>
+            아직 이번 달 반 배정이 적용되지 않았습니다. [4]번 섹션에서 버튼을 눌러주세요.
+          </div>
         )}
       </div>
 
@@ -1285,7 +1499,7 @@ export default function AdminPage() {
             }}
             title="모든 반 소감 전체(영구)삭제"
           >
-            전체 소감 삭제
+            [5] 전체 소감 삭제
           </button>
 
           <button
@@ -1299,7 +1513,7 @@ export default function AdminPage() {
               fontWeight: 'bold',
               cursor: 'pointer',
             }}
-            title="3일 지난 소감을 정리(영구 삭제)"
+            title="3일 지난 소감 정리(영구 삭제)"
           >
             3일 지난 소감 정리
           </button>
@@ -1333,7 +1547,7 @@ export default function AdminPage() {
         }}
       >
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
-          <h3 style={{ margin: 0 }}>이번 달 크루 달리기 현황</h3>
+          <h3 style={{ margin: 0 }}>[6] 이번 달 크루 달리기 현황</h3>
           <button
             onClick={() => setShowCrewStatus(!showCrewStatus)}
             style={{
@@ -1539,7 +1753,7 @@ export default function AdminPage() {
           boxShadow: '0 4px 10px rgba(0,0,0,0.06)',
         }}
       >
-        <h3 style={{ marginTop: 0, marginBottom: 10 }}>명예의 전당 수동 수정</h3>
+        <h3 style={{ marginTop: 0, marginBottom: 10 }}>[7] 명예의 전당 수동 수정</h3>
         <p style={{ fontSize: 12, marginBottom: 10, color: '#555' }}>
           사용자가 메달에 대해 이의를 제기했을 때, 연도·월·이름 기준으로 메달을 조정할 수 있습니다.
           수정 시 해당 사용자의 개인 메달 기록도 함께 반영됩니다.
@@ -1609,7 +1823,7 @@ export default function AdminPage() {
         }}
       >
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14 }}>
-          <h3 style={{ margin: 0, color: '#1D3557' }}>📊 월별 결과 보고서 (아카이브)</h3>
+          <h3 style={{ margin: 0, color: '#1D3557' }}>[8] 월별 결과 보고서 (아카이브)</h3>
           <div style={{ display: 'flex', gap: 8 }}>
             <button
               onClick={handleSaveCurrentReport}
@@ -1716,7 +1930,7 @@ export default function AdminPage() {
       >
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14 }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-            <h3 style={{ margin: 0, color: '#1D3557' }}>🏆 올해 누적 보고서 (성경 1독 현황)</h3>
+            <h3 style={{ margin: 0, color: '#1D3557' }}>[9] 올해 누적 보고서 (성경 1독 현황)</h3>
             <select
               value={selectedYearForReport}
               onChange={(e) => {
@@ -1825,7 +2039,95 @@ export default function AdminPage() {
         )}
       </div>
 
-    </div>
+
+
+      {/* 👑 관리자 권한 관리 */}
+      <div
+        style={{
+          marginBottom: 40,
+          padding: 16,
+          borderRadius: 12,
+          background: '#FFFFFF',
+          boxShadow: '0 4px 12px rgba(0,0,0,0.04)',
+          borderLeft: '5px solid #333'
+        }}
+      >
+        <h3 style={{ marginTop: 0, marginBottom: 10, color: '#333' }}>[10] 관리자 권한 관리</h3>
+        <p style={{ fontSize: 12, marginBottom: 16, color: '#555' }}>
+          지정된 사용자는 비밀번호 입력 없이 관리자 페이지에 즉시 접속할 수 있습니다. (소수 정예 운영 권장)
+        </p>
+
+        {/* 현재 관리자 목록 */}
+        <h4 style={{ fontSize: 14, marginBottom: 8 }}>현재 관리자 목록</h4>
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginBottom: 20 }}>
+          {Object.values(users || {}).filter(u => u.isAdmin).length === 0 && (
+            <div style={{ fontSize: 13, color: '#999' }}>지정된 관리자가 없습니다.</div>
+          )}
+          {Object.entries(users || {}).filter(([_, u]) => u.isAdmin).map(([uid, u]) => (
+            <div key={uid} style={{
+              display: 'flex', alignItems: 'center', gap: 6,
+              padding: '6px 10px', background: '#f5f5f5', borderRadius: 20, border: '1px solid #ddd'
+            }}>
+              <span style={{ fontWeight: 'bold', fontSize: 13 }}>{u.name || uid}</span>
+              <button
+                onClick={() => handleToggleAdmin(uid, u.name, true)} // 해제
+                style={{
+                  border: 'none', background: 'none', cursor: 'pointer', fontSize: 12, color: '#E63946', padding: 0
+                }}
+              >
+                ✕
+              </button>
+            </div>
+          ))}
+        </div>
+
+        {/* 새 관리자 추가 */}
+        <h4 style={{ fontSize: 14, marginBottom: 8 }}>관리자 추가</h4>
+        <div style={{ display: 'flex', gap: 8, maxWidth: 300 }}>
+          <input
+            placeholder="이름 입력"
+            id="newAdminNameInput"
+            style={{ flex: 1, padding: 8, borderRadius: 6, border: '1px solid #ccc' }}
+          />
+          <button
+            onClick={() => {
+              const nameInput = document.getElementById('newAdminNameInput');
+              const name = (nameInput.value || '').trim();
+              if (!name) return;
+
+              // 이름으로 UID 찾기
+              const foundEntry = Object.entries(users || {}).find(([_, u]) => u.name === name);
+
+              if (!foundEntry) {
+                alert(`'${name}' 사용자를 찾을 수 없습니다.`);
+                return;
+              }
+              const [uid, u] = foundEntry;
+
+              if (u.isAdmin) {
+                alert('이미 관리자입니다.');
+                return;
+              }
+
+              handleToggleAdmin(uid, u.name, false); // 추가
+              nameInput.value = '';
+            }}
+            style={{
+              padding: '8px 12px',
+              borderRadius: 6,
+              border: 'none',
+              background: '#333',
+              color: '#fff',
+              fontWeight: 'bold',
+              cursor: 'pointer',
+            }}
+          >
+            추가
+          </button>
+        </div>
+      </div>
+
+    </div >
   );
 }
 

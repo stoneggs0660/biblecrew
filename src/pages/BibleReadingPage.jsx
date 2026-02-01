@@ -22,21 +22,26 @@ export default function BibleReadingPage({ user }) {
   const date = query.get('date');
 
   // ✅ '달리는 중..' 상태를 위해: 성경 읽기 페이지 진입 시 dailyActivity 기록
-  // - RTDB 경로: users/{uid}/dailyActivity/{YYYY-MM-DD}/biblePageVisited = true
-  // - 기준 날짜는 URL의 date 파라미터(일일 분량 날짜). 일반적으로 '오늘'을 열게 됨.
+  // - 2초 이상 머물고, 화면이 활성화된 경우만 기록 (실수로 눌렀다 바로 닫거나 브라우저 세션 복원 시 자동 기록 방지)
   useEffect(() => {
     if (!uid) return;
     if (!date) return;
-    // date 형식이 깨져 있으면 기록하지 않음
     if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return;
-    const path = ref(db, `users/${uid}/dailyActivity/${date}`);
-    update(path, {
-      biblePageVisited: true,
-      visitedAt: Date.now(),
-    }).catch((e) => {
-      // rules 또는 네트워크 문제 등으로 실패할 수 있으나, 페이지 자체는 계속 열리도록 한다.
-      console.error('[dailyActivity] failed to mark biblePageVisited', e);
-    });
+
+    const timer = setTimeout(() => {
+      // 화면이 보이지 않는 상태(백그라운드 탭 등)라면 기록하지 않음
+      if (document.visibilityState !== 'visible') return;
+
+      const path = ref(db, `users/${uid}/dailyActivity/${date}`);
+      update(path, {
+        biblePageVisited: true,
+        visitedAt: Date.now(),
+      }).catch((e) => {
+        console.error('[dailyActivity] failed to mark biblePageVisited', e);
+      });
+    }, 2000);
+
+    return () => clearTimeout(timer);
   }, [uid, date]);
 
   const [portion, setPortion] = useState(null);

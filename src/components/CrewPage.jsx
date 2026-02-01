@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import useSettings from '../hooks/useSettings';
 import { useNavigate } from 'react-router-dom';
-import { subscribeToCrewChecks, saveCrewCheck, addComment, updateComment, deleteComment, subscribeToCrewComments, getCurrentYMKey, subscribeToUserApproval, subscribeToSingleCrewData, subscribeToUsers, clearUserCrew, getClassNotice, getUserSeenNoticeVersion, markNoticeSeen } from '../firebaseSync';
+import { subscribeToCrewChecks, saveCrewCheck, addComment, updateComment, deleteComment, subscribeToCrewComments, getCurrentYMKey, subscribeToUserApproval, subscribeToSingleCrewData, subscribeToUsers, clearUserCrew, getClassNotice, getUserSeenNoticeVersion, markNoticeSeen, subscribeToCrewApprovals } from '../firebaseSync';
 import { getMonthDates } from '../utils/dateUtils';
 import { getDailyBiblePortionByCrew, OT_TOTAL, NT_TOTAL, ALL_TOTAL, OT_A_TOTAL, OT_B_TOTAL } from '../utils/bibleUtils';
 import RunningCoursePath from './RunningCoursePath';
@@ -25,6 +25,7 @@ export default function CrewPage({ crewName, user }) {
   const [crewStatus, setCrewStatus] = useState([]);
   const [allCrews, setAllCrews] = useState({});
   const [usersMap, setUsersMap] = useState({});
+  const [approvalList, setApprovalList] = useState([]); // ✅ 현재 반 전체 승인 명단 추가
   const [showCrewStatus, setShowCrewStatus] = useState(false);
   const [isMobile, setIsMobile] = useState(false);
   const settings = useSettings();
@@ -150,19 +151,24 @@ export default function CrewPage({ crewName, user }) {
   }, [user, crewName, approvalLoaded, isApproved]);
 
 
-  // 우리 크루 전체 달리기 현황 계산 (참여자들이 함께 보는 용도)
   useEffect(() => {
     const unsubUsers = subscribeToUsers((u) => setUsersMap(u || {}));
-    // ✅ [성능 최적화] 모든 반 데이터를 가져오지 않고, 현재 반(crewName) 데이터만 구독
     const unsubCrews = subscribeToSingleCrewData(crewName, (c) => {
-      // 기존 로직이 { crewName: data } 형태를 기대하므로 구조 맞춰줌
       setAllCrews({ [crewName]: c } || {});
     });
+
+    // ✅ 현재 반의 전체 승인 명단 구독 추가
+    const unsubApp = subscribeToCrewApprovals(crewName, ymKey, (data) => {
+      const names = data ? Object.keys(data) : [];
+      setApprovalList(names);
+    });
+
     return () => {
       if (typeof unsubUsers === 'function') unsubUsers();
       if (typeof unsubCrews === 'function') unsubCrews();
+      if (typeof unsubApp === 'function') unsubApp();
     };
-  }, [crewName]);
+  }, [crewName, ymKey]);
 
   useEffect(() => {
     if (!crewName) {
@@ -194,56 +200,72 @@ export default function CrewPage({ crewName, user }) {
       portionMap[p.date] = p.chapters || 0;
     });
 
-    // ✅ 관리자 모드의 "이번 달 크루 현황" 로직을 그대로 따라가되, 현재 반(crewName)만 계산
-    // - 핵심: users/{uid}/crew 값에 의존하지 않고, crews/{crewName}/users 아래에 존재하는 참여자 기준으로 집계
-    // - 이유: 월별 승인/참여 구조상 user.crew 문자열이 비어있거나 갱신되지 않아도, crews 노드는 정상적으로 존재할 수 있음
     const list = [];
+    const processedUids = new Set();
+    const approvedNames = approvalList || [];
 
-    Object.entries(usersNode).forEach(([uid, u]) => {
-      const userChecks = (u && u.checks) || {};
-      let readChapters = 0;
-      let requiredChapters = 0;
-      let allCovered = true;
+    // (1) 승인 명단 기준 (동기화 포함)
+    approvedNames.forEach((uid) => {
+      const u = usersMap[uid] || {};
+      // 자동 동기화: 승인 명단엔 있는데 내 정보(crew)가 다르면 업데이트
+      // (AdminPage가 아니므로 여기서 직접 업데이트를 수행하기보단, 보여주는 것에 집중하되
+      //  필요하다면 로직을 넣을 수 있지만, 조회 페이지이므로 '보여주는 것'에 집중)
+      // *참고: AdminPage가 열려있으면 거기서 자동 동기화가 돌겠지만, 
+      //  여기서도 승인된 사람은 무조건 리스트에 포함시킵니다.
 
-      uptoDates.forEach((d) => {
-        const ch = portionMap[d] || 0;
-        if (!ch) return;
-        requiredChapters += ch;
-        if (userChecks[d]) {
-          readChapters += ch;
-        } else {
-          allCovered = false;
-        }
-      });
+      processedUids.add(uid);
+      addToList(uid, list, usersNode, portionMap, uptoDates, usersMap, dates, todayKey);
+    });
 
-      // 분량 계산이 불가능하면 제외
-      if (requiredChapters === 0) return;
-
-      const info = users && users[uid] ? users[uid] : {};
-      const name = info.name || uid;
-      const medals = info.medals || {};
-      const progress = Math.round((readChapters / requiredChapters) * 100);
-      const state = getTodayCrewState({
-        dates,
-        todayKey,
-        userChecks,
-        userDailyActivity: info.dailyActivity || {},
-      });
-
-      list.push({
-        uid,
-        name,
-        chapters: readChapters,
-        progress,
-        stateKey: state.key,
-        stateLabel: state.label,
-        medals,
-      });
+    // (2) 소속 정보(crew) 기준
+    Object.entries(usersMap || {}).forEach(([uid, info]) => {
+      if (processedUids.has(uid)) return; // 이미 처리됨
+      if (info.crew === crewName) {
+        addToList(uid, list, usersNode, portionMap, uptoDates, usersMap, dates, todayKey);
+      }
     });
 
     list.sort((a, b) => (b.chapters || 0) - (a.chapters || 0));
     setCrewStatus(list);
-  }, [crewName, allCrews, usersMap]);
+  }, [crewName, allCrews, usersMap, approvalList]);
+
+  // 헬퍼 함수
+  function addToList(uid, list, usersNode, portionMap, uptoDates, usersMap, dates, todayKey) {
+    const u = usersNode[uid] || {};
+    const userChecks = u.checks || {};
+    let readChapters = 0;
+    let requiredChapters = 0;
+
+    uptoDates.forEach((d) => {
+      const ch = portionMap[d] || 0;
+      if (!ch) return;
+      requiredChapters += ch;
+      if (userChecks[d]) {
+        readChapters += ch;
+      }
+    });
+
+    const info = usersMap[uid] || {};
+    const name = info.name || uid;
+    const medals = info.medals || {};
+    const progress = requiredChapters > 0 ? Math.round((readChapters / requiredChapters) * 100) : 0;
+    const state = getTodayCrewState({
+      dates,
+      todayKey,
+      userChecks,
+      userDailyActivity: info.dailyActivity || {},
+    });
+
+    list.push({
+      uid,
+      name,
+      chapters: readChapters,
+      progress,
+      stateKey: state.key,
+      stateLabel: state.label,
+      medals,
+    });
+  }
 
   useEffect(() => {
     // 반별 소감 실시간 구독
