@@ -1563,8 +1563,43 @@ export default function AdminPage() {
             </p>
           </div>
         ) : (
-          <div style={{ fontSize: 13, color: '#777' }}>
-            아직 이번 달 반 배정이 적용되지 않았습니다. [4]번 섹션에서 배정 버튼을 눌러주세요.
+          <div style={{
+            fontSize: 13,
+            color: '#777',
+            background: '#F1F3F5',
+            padding: '30px 20px',
+            borderRadius: 12,
+            border: '1px dashed #CED4DA',
+            textAlign: 'center'
+          }}>
+            <p style={{ marginBottom: 15, fontWeight: 'bold', color: '#495057' }}>
+              아직 이번 달({ymKey}) 반 배정 기초 기록이 없습니다.
+            </p>
+            <p style={{ marginBottom: 20, fontSize: 12, color: '#868E96' }}>
+              기능 업데이트 이전에 이번 달 활동을 이미 시작하신 경우,<br />
+              아래 버튼을 눌러 현재 명단([2]번 섹션)을 이번 달 기초 배정 데이터로 확정할 수 있습니다.
+            </p>
+            <button
+              onClick={() => handleApplyAssignments(ymKey, approvalLists)}
+              style={{
+                padding: '12px 24px',
+                background: '#457B9D',
+                color: '#fff',
+                border: 'none',
+                borderRadius: 8,
+                fontWeight: 'bold',
+                cursor: 'pointer',
+                boxShadow: '0 4px 6px rgba(0,0,0,0.1)',
+                transition: 'all 0.2s'
+              }}
+              onMouseOver={(e) => e.target.style.background = '#1D3557'}
+              onMouseOut={(e) => e.target.style.background = '#457B9D'}
+            >
+              &lt;2번 명단을 5번으로 가져오기&gt;
+            </button>
+            <p style={{ fontSize: 11, marginTop: 15, color: '#ADB5BD' }}>
+              ※ 이 작업은 이번 달 기초 명단을 서버에 기록하여 [5]번 섹션에서 변동 사항을 관리할 수 있게 해줍니다.
+            </p>
           </div>
         )}
       </div>
