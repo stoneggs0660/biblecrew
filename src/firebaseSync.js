@@ -387,18 +387,21 @@ export async function saveMonthlyHallOfFame(year, month, ranking) {
     resultsByMedal[medalKey].push({ name: displayName, crew: crewName });
     legacyPayload[medalKey][u.uid] = { name: displayName, crew: crewName, chapters: u.chapters || 0 };
 
-    // ✅ 중복 지급 방지 로직
-    const awardRecordRef = ref(db2, `users/${u.uid}/earnedMedals/${ymKey}`);
+    // ✅ 중복 지급 방지 로직 (수정: 반별로 구분하여 지급)
+    // 기존: users/{uid}/earnedMedals/{YYYY-MM} -> 반 상관없이 월 1회만 지급됨
+    // 변경: users/{uid}/earnedMedals/{YYYY-MM}_{CrewName} -> 반마다 지급 가능
+    const awardKey = `${ymKey}_${crewName}`;
+    const awardRecordRef = ref(db2, `users/${u.uid}/earnedMedals/${awardKey}`);
     const medalCountRef = ref(db2, `users/${u.uid}/medals/${medalKey}`);
 
     const awardSnap = await get(awardRecordRef);
     const alreadyAwarded = awardSnap.val();
 
     if (alreadyAwarded === medalKey) {
-      // 이미 같은 메달을 받았다면 카운트 증가 생략
+      // 이미 이 반에서 같은 메달을 받았다면 카운트 증가 생략
       continue;
     } else if (alreadyAwarded && alreadyAwarded !== medalKey) {
-      // 다른 메달을 이미 받았다면 (기존꺼 -1, 새꺼 +1) - 드문 경우지만 대응
+      // 이 반에서 다른 메달을 이미 받았다면 (예: 은->금 승격 등) 교체
       const oldMedalRef = ref(db2, `users/${u.uid}/medals/${alreadyAwarded}`);
       tasks.push((async () => {
         const oldSnap = await get(oldMedalRef);
@@ -432,55 +435,94 @@ export async function saveMonthlyHallOfFame(year, month, ranking) {
 
 
 // ✅ 명예의 전당 수동 수정: 특정 연/월/사용자의 메달 조정 (월별 + 개인 메달 동기화)
-export async function adminSetMonthlyUserMedal(year, month, uid, medalType) {
-  if (!year || !month || !uid) return false;
+export async function adminSetMonthlyUserMedal(year, month, uid, medalType, crewName) {
+  if (!year || !month || !uid || !crewName) return false;
   const db = getDatabase();
-  const monthlyRef = ref(db, `hallOfFame/monthly/${year}/${month}`);
-  const snap = await get(monthlyRef);
-  const data = snap.val() || { gold: {}, silver: {}, bronze: {} };
+  const mm = String(month).padStart(2, '0');
+  const ymKey = `${year}-${mm}`;
+  const awardKey = `${ymKey}_${crewName}`;
+
+  // 0. 월별 결과 보고서(monthlyReports) 동기화 준비
+  const reportRef = ref(db, `monthlyReports/${ymKey}`);
+  const reportSnap = await get(reportRef);
+  const reportData = reportSnap.val() || null;
+
+  // 1. 레거시(monthly) 데이터 로드 및 수정
+  const legacyRef = ref(db, `hallOfFame/monthly/${year}/${month}`);
+  const legacySnap = await get(legacyRef);
+  const legacyData = legacySnap.val() || { gold: {}, silver: {}, bronze: {} };
+
+  // 2. 신규 구조(hofYear) 데이터 로드 및 수정
+  const hofYearRef = ref(db, `hallOfFame/${year}/monthlyResults/${mm}`);
+  const hofYearSnap = await get(hofYearRef);
+  const hofYearData = hofYearSnap.val() || { gold: [], silver: [], bronze: [] };
 
   const buckets = ['gold', 'silver', 'bronze'];
-  let previousType = null;
 
-  // 기존 메달 위치에서 제거
+  // 3. 해당 사용자의 이 '반'에서의 기존 메달 기록 확인 (중복 지급 방지 및 증빙용)
+  const awardRecordRef = ref(db, `users/${uid}/earnedMedals/${awardKey}`);
+  const awardSnap = await get(awardRecordRef);
+  const previousType = awardSnap.val(); // 이전에 이 반에서 받은 메달 종류
+
+  let userName = uid;
+  const userSnap = await get(ref(db, `users/${uid}`));
+  const user = userSnap.val() || {};
+  userName = user.name || uid;
+
+  // 4. 명예의 전당 명단(Hall of Fame)에서 기존 기록 제거
   buckets.forEach((type) => {
-    const bucket = data[type] || {};
-    if (bucket[uid]) {
-      previousType = type;
-      delete bucket[uid];
-      data[type] = bucket;
+    // 레거시 제거 (UID 기준)
+    if (legacyData[type] && legacyData[type][uid]) {
+      // 단, 수동 수정 시에는 '반' 이름이 일치할 때만 지워야 함 (레거시는 반 이름 정보가 부족할 수 있음)
+      if (legacyData[type][uid].crew === crewName) {
+        delete legacyData[type][uid];
+      }
+    }
+
+    // 신규 구조 제거 (이름 + 반 기준)
+    if (Array.isArray(hofYearData[type])) {
+      hofYearData[type] = hofYearData[type].filter(item => {
+        const iName = typeof item === 'object' ? item.name : item;
+        const iCrew = typeof item === 'object' ? item.crew : '';
+        return !(iName === userName && iCrew === crewName);
+      });
     }
   });
 
-  // 새 메달 타입이 있다면 추가 (없으면 삭제만 수행)
+  // 5. 새 메달 타입이 있다면 명예의 전당 명단에 추가
   if (medalType && medalType !== 'none') {
-    if (!data[medalType]) data[medalType] = {};
-    // 사용자 정보에서 이름/반을 가져와 저장
-    const userSnap = await get(ref(db, `users/${uid}`));
-    const user = userSnap.val() || {};
-    data[medalType][uid] = {
-      name: user.name || '이름없음',
-      crew: user.crew || '',
+    // 레거시 추가
+    if (!legacyData[medalType]) legacyData[medalType] = {};
+    legacyData[medalType][uid] = {
+      name: userName,
+      crew: crewName,
       chapters: 0,
     };
+
+    // 신규 구조 추가
+    if (!Array.isArray(hofYearData[medalType])) hofYearData[medalType] = [];
+    hofYearData[medalType].push({
+      name: userName,
+      crew: crewName
+    });
   }
 
   const tasks = [];
 
-  // 개인 메달 카운트 조정 (이전 메달 -1)
-  if (previousType) {
+  // 6. 개인 메달 총 개수(Counter) 조정
+  // 이전 메달 -1
+  if (previousType && buckets.includes(previousType)) {
     const prevRef = ref(db, `users/${uid}/medals/${previousType}`);
     tasks.push(
       get(prevRef).then((s) => {
         const current = s.val() || 0;
-        const next = current > 0 ? current - 1 : 0;
-        return set(prevRef, next);
+        return set(prevRef, Math.max(0, current - 1));
       })
     );
   }
 
-  // 새 메달 +1 (none이면 추가 안 함)
-  if (medalType && medalType !== 'none') {
+  // 새 메달 +1
+  if (medalType && medalType !== 'none' && buckets.includes(medalType)) {
     const nextRef = ref(db, `users/${uid}/medals/${medalType}`);
     tasks.push(
       get(nextRef).then((s) => {
@@ -488,10 +530,35 @@ export async function adminSetMonthlyUserMedal(year, month, uid, medalType) {
         return set(nextRef, current + 1);
       })
     );
+    // earnedMedals 영수증 기록
+    tasks.push(set(awardRecordRef, medalType));
+  } else if (medalType === 'none') {
+    // 메달 삭제 시 영수증도 삭제
+    tasks.push(set(awardRecordRef, null));
   }
 
-  // 월별 명예의 전당 데이터 저장
-  tasks.push(set(monthlyRef, data));
+  // 7. DB 최종 저장
+  tasks.push(set(legacyRef, legacyData));
+  tasks.push(set(hofYearRef, hofYearData));
+
+  // 8. 월별 결과 보고서(monthlyReports)가 있다면 함께 수정하여 일관성 유지
+  if (reportData && reportData[uid]) {
+    const isAdding = medalType && medalType !== 'none';
+    const updatedUserReport = {
+      ...reportData[uid],
+      stateLabel: isAdding ? '성공' : '실패'
+    };
+
+    // 가능하면 전체 메달 개수도 즉시 반영 (낙관적 업데이트)
+    if (user.medals) {
+      const m = { ...user.medals };
+      if (previousType && m[previousType] > 0) m[previousType]--;
+      if (isAdding) m[medalType] = (m[medalType] || 0) + 1;
+      updatedUserReport.totalMedals = (m.gold || 0) + (m.silver || 0) + (m.bronze || 0);
+    }
+
+    tasks.push(set(ref(db, `monthlyReports/${ymKey}/${uid}`), updatedUserReport));
+  }
 
   await Promise.all(tasks);
   return true;
@@ -544,7 +611,7 @@ export function addCrewApprovalName(crew, ymKey, name) {
 
 
 // 이름 정규화 (앞쪽 콤마/공백 제거, 양끝 공백 제거)
-function normalizeNameForKey(name) {
+export function normalizeNameForKey(name) {
   return (name || '')
     .toString()
     .trim()
@@ -571,50 +638,41 @@ export async function addCrewApprovalNames(crew, ymKey, namesInput) {
   return names;
 }
 
-// ✅ 다음달 신청자(단일) 승인: approvals에 기록 + nextMonthApplications에서 제거
-export async function approveNextMonthApplicant(ymKey, crew, applicantKey) {
-  if (!ymKey || !crew || !applicantKey) return null;
-
-  const snap = await get(ref(db, `nextMonthApplications/${ymKey}/${crew}/${applicantKey}`));
-  const obj = snap.val();
-  const cleanName = normalizeNameForKey(obj?.name ?? applicantKey);
-  if (!cleanName) return null;
-
+// ✅ 수동 승인 + 히스토리 동시 저장 (이름/UID 기반)
+export async function addManualApprovalWithHistory(crew, ymKey, userList) {
+  if (!userList || userList.length === 0) return;
+  const db = getDatabase();
   const updates = {};
-  updates[`approvals/${ymKey}/${crew}/${cleanName}`] = true;
-  updates[`nextMonthApplications/${ymKey}/${crew}/${applicantKey}`] = null;
 
-  await update(ref(db), updates);
-  return cleanName;
-}
+  userList.forEach((u) => {
+    const cleanName = normalizeNameForKey(u.name);
+    if (!cleanName) return;
 
-// ✅ 다음달 신청자(전체) 승인: approvals에 기록 + nextMonthApplications에서 제거
-export async function approveAllNextMonthApplicants(ymKey, crew) {
-  if (!ymKey || !crew) return { approved: [], skipped: [] };
-
-  const snap = await get(ref(db, `nextMonthApplications/${ymKey}/${crew}`));
-  const applicants = snap.val() || {};
-
-  const updates = {};
-  const approved = [];
-  const skipped = [];
-
-  Object.entries(applicants).forEach(([key, obj]) => {
-    const cleanName = normalizeNameForKey(obj?.name ?? key);
-    if (!cleanName) {
-      skipped.push(key);
-      return;
-    }
+    // 1. 승인 목록 (이름 기반)
     updates[`approvals/${ymKey}/${crew}/${cleanName}`] = true;
-    updates[`nextMonthApplications/${ymKey}/${crew}/${key}`] = null;
-    approved.push(cleanName);
+
+    // 2. 신청 기록 (UID 기반) 및 사용자 프로필 동기화
+    if (u.uid) {
+      updates[`applicationHistory/${ymKey}/${u.uid}/${crew}`] = {
+        name: u.name,
+        crew,
+        ymKey,
+        createdAt: Date.now(),
+        method: 'manual_approval_immediate',
+      };
+      // ✅ [추가] 수동 추가 시에도 사용자 소속(crew) 정보를 즉시 업데이트
+      updates[`users/${u.uid}/crew`] = crew;
+      updates[`users/${u.uid}/hiddenUnassigned`] = false;
+      updates[`users/${u.uid}/status`] = 'active';
+    }
   });
 
-  if (Object.keys(updates).length === 0) return { approved: [], skipped };
-
-  await update(ref(db), updates);
-  return { approved, skipped };
+  return update(ref(db), updates);
 }
+
+
+
+
 // 해당 반 이번 달 승인 전체 삭제
 export function clearCrewApprovals(crew, ymKey) {
   const path = ref(db, `approvals/${ymKey}/${crew}`);
@@ -635,6 +693,14 @@ export function subscribeToUserApproval(crew, ymKey, uid, callback) {
 
 
 export async function loginOrRegisterUser(name, password) {
+  // ✅ 이름 유효성 검사: 한글 또는 영문만 허용 (공백, 숫자, 특수문자 불가)
+  const nameRegex = /^[가-힣a-zA-Z]+$/;
+  if (!name || !nameRegex.test(name)) {
+    const err = new Error('이름은 한글 또는 영문자만 입력 가능합니다. (공백, 숫자, 특수문자 불가)');
+    err.code = 'INVALID_NAME';
+    throw err;
+  }
+
   const db = getDatabase();
   const uid = name; // 현재 구조에서는 이름을 UID로 사용
   const userRef = ref(db, `users/${uid}`);
@@ -752,11 +818,32 @@ export async function updateAdminPassword(newPassword) {
   return true;
 }
 
+// ✅ [안전 추가] 사용자 관리자 권한 부여/해제 (DB 구조 변경 없음, 필드만 추가)
+export async function setAdminStatus(uid, isAdmin) {
+  if (!uid) return false;
+  const db2 = getDatabase();
+  // isAdmin 필드만 업데이트 (기존 데이터 보존)
+  await update(ref(db2, `users/${uid}`), { isAdmin: !!isAdmin });
+  return true;
+}
+
 
 // ✅ 다음 달 크루 신청 관리
 
 // 다음 달 크루 신청 저장
 
+// [사용자용] 다음 달 크루 신청 (기존 내역 덮어쓰기 = 하나만 유지)
+export async function overwriteNextMonthApplication(crew, uid, name) {
+  if (!crew || !uid) return;
+
+  // 1. 기존 내역 전체 취소
+  await cancelNextMonthApplication(uid, null); // null = 전체 취소
+
+  // 2. 새로운 내역 저장
+  return saveNextMonthApplication(crew, uid, name);
+}
+
+// 다음 달 크루 신청 저장 (중복 신청 허용 - 관리자용/추가용)
 export function saveNextMonthApplication(crew, uid, name) {
   if (!crew || !uid) return Promise.resolve();
   const db = getDatabase();
@@ -769,31 +856,25 @@ export function saveNextMonthApplication(crew, uid, name) {
     createdAt: Date.now(),
   };
 
-  const rootRef = ref(db, `/nextMonthApplications/${ymKey}`);
   const byCrewRef = ref(db, `/nextMonthApplications/${ymKey}/${crew}/${uid}`);
-  const byUserRef = ref(db, `/nextMonthApplicationsByUser/${ymKey}/${uid}`);
+  // 사용자별 신청 목록 (여러 반 가능하므로 crew를 키로 사용)
+  const byUserRef = ref(db, `/nextMonthApplicationsByUser/${ymKey}/${uid}/${crew}`);
 
-  // ✅ 누적 신청 기록용 (승인되어도 삭제하지 않음)
-  const historyRef = ref(db, `/applicationHistory/${ymKey}/${uid}`);
+  // ✅ 누적 신청 기록용 (승인되어도 삭제하지 않음 - 역시 crew 키로 분리하거나 로그성으로 저장)
+  // 여기서는 덮어쓰기보다는 로그성으로 남기는게 좋겠지만, 기존 호환성을 위해 
+  // applicationHistory/{ymKey}/{uid}/{crew} 구조로 저장하는 것이 안전함.
+  const historyRef = ref(db, `/applicationHistory/${ymKey}/${uid}/${crew}`);
 
-  return get(rootRef).then((snap) => {
-    const val = snap.val() || {};
-    const tasks = [];
+  // ✅ 자동 승인: 신청 즉시 승인 목록에도 추가
+  const cleanName = normalizeNameForKey(name);
+  const approvalRef = ref(db, `/approvals/${ymKey}/${crew}/${cleanName}`);
 
-    Object.keys(val).forEach((crewKey) => {
-      const crewUsers = val[crewKey] || {};
-      if (crewUsers && crewUsers[uid]) {
-        const oldRef = ref(db, `/nextMonthApplications/${ymKey}/${crewKey}/${uid}`);
-        tasks.push(set(oldRef, null));
-      }
-    });
-
-    tasks.push(set(byCrewRef, base));
-    tasks.push(set(byUserRef, base));
-    tasks.push(set(historyRef, base)); // 히스토리 저장
-
-    return Promise.all(tasks);
-  });
+  return Promise.all([
+    set(byCrewRef, base),
+    set(byUserRef, base),
+    set(historyRef, base),
+    cleanName ? set(approvalRef, true) : Promise.resolve(), // 승인 처리
+  ]);
 }
 
 // 현재 로그인한 사용자의 다음 달 신청 내역 구독
@@ -813,36 +894,73 @@ export function subscribeToMyNextMonthApplication(uid, callback) {
 
 
 
-// 다음 달 크루 신청 취소
-export function cancelNextMonthApplication(uid) {
+// 다음 달 크루 신청 취소 (특정 반 지정 가능)
+export function cancelNextMonthApplication(uid, targetCrew = null) {
   if (!uid) return Promise.resolve();
   const db = getDatabase();
   const ymKey = getNextYMKey();
 
-  const rootRef = ref(db, `/nextMonthApplications/${ymKey}`);
-  const byUserRef = ref(db, `/nextMonthApplicationsByUser/${ymKey}/${uid}`);
+  // 1. 특정 반만 취소하는 경우
+  if (targetCrew) {
+    const byCrewRef = ref(db, `/nextMonthApplications/${ymKey}/${targetCrew}/${uid}`);
+    const byUserCrewRef = ref(db, `/nextMonthApplicationsByUser/${ymKey}/${uid}/${targetCrew}`);
 
-  return get(rootRef).then((snap) => {
-    const val = snap.val() || {};
+    // 히스토리에서도 삭제할지 여부는 정책 나름이나, 신청 취소이므로 히스토리도 지우는게 깔끔함.
+    // 다만 saveNextMonthApplication에서 히스토리를 `{uid}/{crew}`로 저장하도록 바꿨으므로 여기서도 그렇게 지움.
+    const historyRef = ref(db, `/applicationHistory/${ymKey}/${uid}/${targetCrew}`);
+
+    // ✅ 승인 목록에서도 삭제해야 함 (이름을 알아야 함)
+    // 이름을 알기 위해 먼저 application을 읽어야 함.
+    return get(byUserCrewRef).then((snap) => {
+      const val = snap.val();
+      const name = val ? val.name : '';
+      const cleanName = normalizeNameForKey(name);
+      const approvalRef = ref(db, `/approvals/${ymKey}/${targetCrew}/${cleanName}`);
+
+      return Promise.all([
+        set(byCrewRef, null),
+        set(byUserCrewRef, null),
+        set(historyRef, null),
+        cleanName ? set(approvalRef, null) : Promise.resolve(),
+      ]);
+    });
+  }
+
+  // 2. 전체 취소 (기존 호환성 및 일괄 취소)
+  // 사용자 기준 노드 전체 삭제
+  const byUserRootRef = ref(db, `/nextMonthApplicationsByUser/${ymKey}/${uid}`);
+
+  // 반별 노드 삭제를 위해 전체 검색 필요 (비효율적일 수 있으나 정확성 위해)
+  // 또는 byUserRootRef를 읽어서 신청한 반 목록을 확인 후 삭제
+  return get(byUserRootRef).then((snap) => {
+    const val = snap.val() || {}; // { 고급반: {...}, 초급반: {...} }
     const tasks = [];
 
-    // 사용자 기준 신청 내역 제거
-    tasks.push(set(byUserRef, null));
+    // 사용자 루트 삭제
+    tasks.push(set(byUserRootRef, null));
 
-    // 각 반에서 해당 사용자의 신청 내역 제거
-    Object.keys(val).forEach((crew) => {
-      const crewUsers = val[crew] || {};
-      if (crewUsers && crewUsers[uid]) {
-        const byCrewRef = ref(db, `/nextMonthApplications/${ymKey}/${crew}/${uid}`);
-        tasks.push(set(byCrewRef, null));
+    // 각 반별 삭제
+    Object.keys(val).forEach((crewKey) => {
+      const byCrewRef = ref(db, `/nextMonthApplications/${ymKey}/${crewKey}/${uid}`);
+      const historyRef = ref(db, `/applicationHistory/${ymKey}/${uid}/${crewKey}`);
+
+      // ✅ 승인 목록에서도 삭제
+      const name = val[crewKey] ? val[crewKey].name : '';
+      const cleanName = normalizeNameForKey(name);
+      if (cleanName) {
+        const approvalRef = ref(db, `/approvals/${ymKey}/${crewKey}/${cleanName}`);
+        tasks.push(set(approvalRef, null));
       }
+
+      tasks.push(set(byCrewRef, null));
+      tasks.push(set(historyRef, null));
     });
 
     return Promise.all(tasks);
   });
 }
 
-// 다음 달 전체 신청자 목록(반별) 구독
+// ✅ [Legacy Support] 다음 달 전체 신청자 목록(반별) 구독 (구버전 호환용)
 export function subscribeToNextMonthApplications(callback) {
   const db = getDatabase();
   const ymKey = getNextYMKey();
@@ -852,12 +970,43 @@ export function subscribeToNextMonthApplications(callback) {
   });
 }
 
+// ✅ [Legacy Support] 구버전 신청자 일괄 승인 처리
+export async function approveAllNextMonthApplicants(ymKey, crew) {
+  if (!ymKey || !crew) return { approved: [], skipped: [] };
+  const db = getDatabase();
+
+  const snap = await get(ref(db, `nextMonthApplications/${ymKey}/${crew}`));
+  const applicants = snap.val() || {};
+
+  const updates = {};
+  const approved = [];
+  const skipped = [];
+
+  Object.entries(applicants).forEach(([key, obj]) => {
+    const cleanName = normalizeNameForKey(obj?.name ?? key);
+    if (!cleanName) {
+      skipped.push(key);
+      return;
+    }
+    updates[`approvals/${ymKey}/${crew}/${cleanName}`] = true;
+    updates[`nextMonthApplications/${ymKey}/${crew}/${key}`] = null;
+    approved.push(cleanName);
+  });
+
+  if (Object.keys(updates).length === 0) return { approved: [], skipped };
+
+  await update(ref(db), updates);
+  return { approved, skipped };
+}
+
+
+
 
 // 최근 N개월(nextMonthApplications) 키 조회 및 정리 (관리자용)
 // - limit 개수만 남기고 오래된 달은 삭제
 export async function getRecentApplicationMonths(limit = 3) {
   const db = getDatabase();
-  const rootRef = ref(db, '/nextMonthApplications');
+  const rootRef = ref(db, '/applicationHistory');
   const snap = await get(rootRef);
   const val = snap.val() || {};
   const keys = Object.keys(val)
@@ -890,13 +1039,55 @@ export async function getRecentApplicationMonths(limit = 3) {
 }
 
 // 특정 연-월(YYYY-MM)의 신청자 전체 데이터를 불러오기 (누적 히스토리 기준)
+// ✅ 반 배정 적용 및 히스토리 저장
+export async function applyMonthlyAssignments(ymKey, approvalLists) {
+  const db = getDatabase();
+  const updates = {};
+  const timestamp = Date.now();
+
+  // 1. 사용자 정보 업데이트 (모든 반 순회)
+  for (const [crew, uids] of Object.entries(approvalLists)) {
+    if (!uids || !Array.isArray(uids)) continue;
+    uids.forEach(uid => {
+      updates[`users/${uid}/crew`] = crew;
+      updates[`users/${uid}/hiddenUnassigned`] = false;
+      updates[`users/${uid}/status`] = 'active';
+    });
+  }
+
+  // 2. 5번 섹션을 위한 기초 스냅샷 저장 (비교용)
+  updates[`applicationHistory/${ymKey}/snapshot`] = approvalLists;
+  updates[`applicationHistory/${ymKey}/appliedAt`] = timestamp;
+
+  await update(ref(db), updates);
+  return true;
+}
+
+// 배정 완료 여부 확인
+export function subscribeToAssignmentStatus(ymKey, callback) {
+  const db = getDatabase();
+  const r = ref(db, `/applicationHistory/${ymKey}/appliedAt`);
+  return onValue(r, (snap) => callback(snap.val() || null));
+}
+
+// 스냅샷 불러오기 (5번 섹션용)
+export async function fetchAssignmentSnapshot(ymKey) {
+  const db = getDatabase();
+  const snap = await get(ref(db, `/applicationHistory/${ymKey}/snapshot`));
+  return snap.val() || {};
+}
+
 export async function fetchApplicationsByMonth(ymKey) {
   if (!ymKey) return {};
   const db = getDatabase();
-  // ✅ nextMonthApplications 대신 applicationHistory를 조회하여 승인된 사람도 포함되게 함
+  // ✅ snapshot을 우선 조회 (새로운 로직)
+  const snap = await get(ref(db, `/applicationHistory/${ymKey}/snapshot`));
+  if (snap.exists()) return snap.val();
+
+  // 없으면 구버전(uid 기반) 조회
   const rootRef = ref(db, `/applicationHistory/${ymKey}`);
-  const snap = await get(rootRef);
-  return snap.val() || {};
+  const snapLegacy = await get(rootRef);
+  return snapLegacy.val() || {};
 }
 
 // ✅ 공지 관리 (항상 1개만 유지)

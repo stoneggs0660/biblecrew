@@ -1,6 +1,8 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { subscribeToAllCrewChecks, subscribeToUsers } from '../firebaseSync';
+import { db } from '../firebase';
+import { ref, onValue } from 'firebase/database';
 import { CREW_KEYS, getCrewLabel } from '../utils/crewConfig';
 import { getMonthDates } from '../utils/dateUtils';
 import { getDailyBiblePortionByCrew } from '../utils/bibleUtils';
@@ -10,13 +12,33 @@ export default function CrewMembers({ user }) {
   const navigate = useNavigate();
   const [crews, setCrews] = useState({});
   const [users, setUsers] = useState({});
+  const [approvalLists, setApprovalLists] = useState({});
 
   useEffect(() => {
     const unsubCrews = subscribeToAllCrewChecks((c) => setCrews(c || {}));
     const unsubUsers = subscribeToUsers((u) => setUsers(u || {}));
+
+    // ✅ 관리자 승인 목록 구독 추가 (현재 달 기준)
+    const now = new Date();
+    const ymKey = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+
+    const unsubs = [];
+    CREW_KEYS.forEach((crew) => {
+      const path = ref(db, `approvals/${ymKey}/${crew}`);
+      const unsub = onValue(path, (snap) => {
+        const names = snap.val() ? Object.keys(snap.val()) : [];
+        setApprovalLists((prev) => ({
+          ...prev,
+          [crew]: names,
+        }));
+      });
+      unsubs.push(unsub);
+    });
+
     return () => {
       if (typeof unsubCrews === 'function') unsubCrews();
       if (typeof unsubUsers === 'function') unsubUsers();
+      unsubs.forEach(fn => fn());
     };
   }, []);
 
@@ -32,59 +54,99 @@ export default function CrewMembers({ user }) {
     const uptoDates = dates.slice(0, today);
 
     const byCrew = {};
-    CREW_KEYS.forEach((crew) => {
-      const crewNode = crews && crews[crew];
-      const usersNode = (crewNode && crewNode.users) || {};
+    CREW_KEYS.forEach(k => byCrew[k] = []);
 
-      const portions = getDailyBiblePortionByCrew(crew, dates);
+    const processedUids = new Set();
+
+    // Pre-calculate portions once for efficiency
+    const portionByCrewAndDate = {};
+    CREW_KEYS.forEach(crewKey => {
+      const portions = getDailyBiblePortionByCrew(crewKey, dates);
       const portionMap = {};
       (portions || []).forEach((p) => {
         if (!p || !p.date) return;
         portionMap[p.date] = typeof p.chapters === 'number' ? p.chapters : 0;
       });
+      portionByCrewAndDate[crewKey] = portionMap;
+    });
 
-      const list = [];
-      Object.entries(usersNode).forEach(([uid, u]) => {
-        const userChecks = (u && u.checks) || {};
-        let readChapters = 0;
-        let requiredChapters = 0;
+    // Helper function to encapsulate the logic for adding a member
+    // Defined inside useMemo to capture its scope and dependencies
+    // Helper function (defined inside useMemo for closure access)
+    const addMemberData = (crew, uid, info) => {
+      // 1. 유효성 체크
+      if (!crew) return;
+      if (!byCrew[crew]) return; // 존재하지 않는 반 키라면 무시
 
-        uptoDates.forEach((d) => {
-          const ch = portionMap[d] || 0;
-          if (!ch) return;
-          requiredChapters += ch;
-          if (userChecks[d]) readChapters += ch;
-        });
-        if (requiredChapters === 0) return;
+      const crewNode = crews[crew] || {};
+      const usersNode = (crewNode.users && crewNode.users[uid]) || {}; // 크루 데이터 내 유저 노드
 
-        const info = (users && users[uid]) || {};
-        const name = info.name || uid;
-        const medals = info.medals || {};
-        const progress = Math.round((readChapters / requiredChapters) * 100);
-        const state = getTodayCrewState({
-          dates,
-          todayKey,
-          userChecks,
-          userDailyActivity: info.dailyActivity || {},
-        });
+      const portionMap = portionByCrewAndDate[crew] || {};
 
-        list.push({
-          uid,
-          name,
-          chapters: readChapters,
-          progress,
-          stateKey: state.key,
-          stateLabel: state.label,
-          medals,
-        });
+      const u = usersNode || {};
+      const userChecks = u.checks || {};
+
+      let readChapters = 0;
+      let requiredChapters = 0;
+
+      uptoDates.forEach((d) => {
+        const ch = portionMap[d] || 0;
+        if (!ch) return;
+        requiredChapters += ch;
+        if (userChecks[d]) readChapters += ch;
       });
 
-      list.sort((a, b) => (b.chapters || 0) - (a.chapters || 0));
-      byCrew[crew] = list;
+      const name = info.name || uid;
+      const medals = info.medals || {};
+      const progress = requiredChapters > 0 ? Math.round((readChapters / requiredChapters) * 100) : 0;
+
+      const state = getTodayCrewState({
+        dates,
+        todayKey,
+        userChecks,
+        userDailyActivity: info.dailyActivity || {},
+      });
+
+      // 리스트에 푸시
+      byCrew[crew].push({
+        uid,
+        name,
+        chapters: readChapters,
+        progress,
+        stateKey: state.key,
+        stateLabel: state.label,
+        medals,
+      });
+    };
+
+    // 1. 승인 명단 기준
+    CREW_KEYS.forEach((crew) => {
+      const approvedUids = approvalLists[crew] || [];
+      approvedUids.forEach((uid) => {
+        processedUids.add(uid);
+        const userInfo = (users || {})[uid];
+        if (userInfo) {
+          addMemberData(crew, uid, userInfo);
+        }
+      });
+    });
+
+    // 2. DB crew 기준 (누락된 인원)
+    Object.entries(users || {}).forEach(([uid, info]) => {
+      if (processedUids.has(uid)) return;
+      const c = info.crew;
+      if (c && byCrew[c]) {
+        addMemberData(c, uid, info);
+      }
+    });
+
+    // 정렬
+    Object.keys(byCrew).forEach(k => {
+      byCrew[k].sort((a, b) => (b.chapters || 0) - (a.chapters || 0));
     });
 
     return { dates, todayKey, byCrew };
-  }, [crews, users]);
+  }, [crews, users, approvalLists]);
 
   return (
     <div
