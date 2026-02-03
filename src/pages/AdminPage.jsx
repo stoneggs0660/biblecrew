@@ -715,44 +715,7 @@ export default function AdminPage() {
     }
   }
 
-  async function handleSaveCurrentReport() {
-    const now = new Date();
-    const year = now.getFullYear();
-    const month = now.getMonth() + 1;
-    const key = `${year}-${String(month).padStart(2, '0')}`;
 
-    if (!window.confirm(`${key} 월의 현재 진행 현황을 최종 보고서로 저장하시겠습니까?\n이미 저장된 경우 덮어씌워집니다.`)) return;
-
-    // 현재 crewStatus 기반으로 리포트 데이터 생성
-    const reportPayload = {};
-    Object.entries(crewStatus).forEach(([crew, members]) => {
-      members.forEach((m) => {
-        const userMedals = users[m.uid]?.medals || {};
-        const totalMedals = (userMedals.gold || 0) + (userMedals.silver || 0) + (userMedals.bronze || 0);
-
-        reportPayload[m.uid] = {
-          uid: m.uid,
-          name: m.name,
-          crew: crew,
-          chapters: m.chapters,
-          progress: m.progress,
-          stateLabel: m.stateLabel, // 성공, 실패 등
-          totalMedals: totalMedals
-        };
-      });
-    });
-
-    try {
-      await saveMonthlyReport(year, month, reportPayload);
-      alert(`${key} 월 보고서가 저장되었습니다.`);
-      // 목록 갱신
-      const updatedMonths = await getMonthlyReportMonths();
-      setReportMonths(updatedMonths);
-    } catch (e) {
-      console.error(e);
-      alert('보고서 저장 중 오류가 발생했습니다.');
-    }
-  }
 
   // ✅ 연간 누적 데이터 계산 및 로드
   async function handleLoadYearlyReport(targetYear) {
@@ -1971,41 +1934,29 @@ export default function AdminPage() {
           boxShadow: '0 4px 12px rgba(0,0,0,0.04)',
         }}
       >
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14 }}>
-          <h3 style={{ margin: 0, color: '#1D3557' }}>[8] 월별 결과 보고서 (아카이브)</h3>
-          <div style={{ display: 'flex', gap: 8 }}>
-            <button
-              onClick={handleSaveCurrentReport}
-              style={{
-                padding: '8px 14px',
-                borderRadius: 8,
-                border: 'none',
-                background: '#2A9D8F',
-                color: '#fff',
-                fontSize: 13,
-                fontWeight: 'bold',
-                cursor: 'pointer',
-              }}
-            >
-              🏁 현재 현황을 보고서로 저장
-            </button>
-            <button
-              onClick={() => setShowMonthlyArchive(!showMonthlyArchive)}
-              style={{
-                padding: '8px 14px',
-                borderRadius: 8,
-                border: '1px solid #1D3557',
-                background: showMonthlyArchive ? '#f1f1f1' : '#fff',
-                color: '#1D3557',
-                fontSize: 13,
-                fontWeight: 'bold',
-                cursor: 'pointer',
-              }}
-            >
-              {showMonthlyArchive ? '🔼 닫기' : '🔽 열기'}
-            </button>
-          </div>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
+          <h3 style={{ margin: 0, color: '#1D3557' }}>[8] 월별 결과 보고서 (과거 기록 조회)</h3>
+          <button
+            onClick={() => setShowMonthlyArchive(!showMonthlyArchive)}
+            style={{
+              padding: '8px 14px',
+              borderRadius: 8,
+              border: '1px solid #1D3557',
+              background: showMonthlyArchive ? '#f1f1f1' : '#fff',
+              color: '#1D3557',
+              fontSize: 13,
+              fontWeight: 'bold',
+              cursor: 'pointer',
+            }}
+          >
+            {showMonthlyArchive ? '🔼 보관함 닫기' : '🔽 보관함 열기'}
+          </button>
         </div>
+        {!showMonthlyArchive && (
+          <p style={{ fontSize: 12, color: '#666', margin: 0 }}>
+            과거의 월별 달리기 결과 및 명단 기록을 선택하여 확인할 수 있습니다.
+          </p>
+        )}
 
         {showMonthlyArchive && (
           <>
