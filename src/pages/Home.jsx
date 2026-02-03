@@ -6,8 +6,10 @@ import {
   saveNextMonthApplication,
   subscribeToMyNextMonthApplication,
   cancelNextMonthApplication,
-  overwriteNextMonthApplication
+  overwriteNextMonthApplication,
+  getCurrentYMKey // 필요할 수 있음
 } from '../firebaseSync';
+import { getCrewLabel } from '../utils/crewConfig';
 
 export default function Home({ user }) {
   const navigate = useNavigate();
@@ -246,7 +248,7 @@ export default function Home({ user }) {
                 ✅ 현재 신청된 반
               </div>
               <div style={{ marginBottom: 10, color: '#0B8457', fontWeight: 600 }}>
-                {appliedCrews.join(', ')}
+                {appliedCrews.map(ck => getCrewLabel(ck)).join(', ')}
               </div>
               <button
                 onClick={handleCancelAll}

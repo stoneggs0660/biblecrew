@@ -131,6 +131,7 @@ export default function AdminPage() {
   const [appliedAt, setAppliedAt] = useState(null); // 이번 달 배정 적용 시간
   const [startMonthLoading, setStartMonthLoading] = useState(false);
   const [currentSnapshot, setCurrentSnapshot] = useState({}); // 배정 확정 시점 스냅샷
+  const [activeTab, setActiveTab] = useState('group1'); // [추가] 탭 상태: group1, group2, group3, group4
 
   const checksUnsubRef = useRef(null);
 
@@ -324,7 +325,6 @@ export default function AdminPage() {
 
   useEffect(() => {
     const unsubUsers = subscribeToUsers(setUsers);
-    const unsubCrews = subscribeToAllCrewChecks(setCrews);
     const unsubNotice = subscribeToNotice((n) => {
       if (n) {
         setNoticeTitle(n.title || '');
@@ -336,14 +336,23 @@ export default function AdminPage() {
     });
     return () => {
       if (typeof unsubUsers === 'function') unsubUsers();
-      if (typeof unsubCrews === 'function') unsubCrews();
       if (typeof unsubNotice === 'function') unsubNotice();
-      if (checksUnsubRef.current) {
-        try { checksUnsubRef.current(); } catch (e) { }
-        checksUnsubRef.current = null;
-      }
     };
   }, []);
+
+  // ✅ [최적화] 그룹 3(현황/수정)이 열릴 때만 무거운 체크 데이터를 구독합니다.
+  useEffect(() => {
+    if (activeTab !== 'group3') {
+      setCrews({}); // 탭이 닫히면 데이터 비우기
+      return;
+    }
+
+    const unsubCrews = subscribeToAllCrewChecks(setCrews);
+    return () => {
+      if (typeof unsubCrews === 'function') unsubCrews();
+    };
+  }, [activeTab]);
+
   useEffect(() => {
     const unsub = subscribeToSettings((s) => {
       const val = s || {};
@@ -939,863 +948,452 @@ export default function AdminPage() {
       </div>
       <p style={{ marginBottom: 20 }}>사용자 반 배정, 체크 수정, 소감/명예의 전당 관리를 할 수 있습니다.</p>
 
-
-      <div style={{ marginBottom: 18 }}>
-        <button
-          type='button'
-          onClick={() => navigate('/admin/class-notice')}
-          style={{
-            padding: '10px 14px',
-            borderRadius: 10,
-            border: 'none',
-            background: '#111827',
-            color: '#fff',
-            fontSize: 14,
-            fontWeight: 800,
-            cursor: 'pointer',
-            boxShadow: '0 6px 16px rgba(0,0,0,0.10)',
-          }}
-        >
-          📢 반 안내팝업 수정
-        </button>
+      {/* 📱 대시보드 탭 메뉴 */}
+      <div style={{
+        display: 'flex',
+        gap: 8,
+        marginBottom: 24,
+        overflowX: 'auto',
+        paddingBottom: 8,
+        flexWrap: 'nowrap',
+        WebkitOverflowScrolling: 'touch'
+      }}>
+        {[
+          { id: 'group1', label: '1. 설정 및 공지', icon: '📢' },
+          { id: 'group2', label: '2. 명단 및 배정', icon: '👥' },
+          { id: 'group3', label: '3. 현황 및 수정', icon: '🏃' },
+          { id: 'group4', label: '4. 보고 및 아카이브', icon: '🏆' },
+        ].map(tab => (
+          <button
+            key={tab.id}
+            onClick={() => setActiveTab(tab.id)}
+            style={{
+              padding: '12px 18px',
+              borderRadius: 12,
+              border: 'none',
+              background: activeTab === tab.id ? '#1D3557' : '#fff',
+              color: activeTab === tab.id ? '#fff' : '#457B9D',
+              fontWeight: 800,
+              fontSize: 14,
+              cursor: 'pointer',
+              boxShadow: activeTab === tab.id ? '0 4px 12px rgba(29, 53, 87, 0.3)' : '0 4px 6px rgba(0,0,0,0.05)',
+              whiteSpace: 'nowrap',
+              transition: 'all 0.2s ease',
+              display: 'flex',
+              alignItems: 'center',
+              gap: 6
+            }}
+          >
+            <span>{tab.icon}</span> {tab.label}
+          </button>
+        ))}
       </div>
 
-      <div
-        style={{
-          marginBottom: 20,
-          padding: 16,
-          borderRadius: 12,
-          background: '#FFFFFF',
-          boxShadow: '0 4px 12px rgba(0,0,0,0.04)',
-        }}
-      >
-        <h3 style={{ marginBottom: 8, color: '#1D3557' }}>[1] 앱 기본 설정</h3>
-        <div style={{ marginBottom: 8 }}>
-          <label style={{ fontSize: 13, display: 'block', marginBottom: 4 }}>교회 이름</label>
-          <div style={{ display: 'flex', gap: 8 }}>
-            <input
-              style={{ flex: 1, padding: 8, borderRadius: 6, border: '1px solid #ccc' }}
-              value={churchNameInput}
-              onChange={(e) => setChurchNameInput(e.target.value)}
-              placeholder='예: 마산회원교회'
-            />
+      {activeTab === 'group1' && (
+        <>
+          <div style={{ marginBottom: 18 }}>
             <button
               type='button'
-              onClick={() => {
-                saveChurchName(churchNameInput || '');
-                alert('교회 이름이 저장되었습니다.');
-              }}
+              onClick={() => navigate('/admin/class-notice')}
               style={{
-                padding: '8px 12px',
-                borderRadius: 6,
+                padding: '10px 14px',
+                borderRadius: 10,
                 border: 'none',
-                background: '#1D3557',
+                background: '#111827',
                 color: '#fff',
-                fontSize: 13,
+                fontSize: 14,
+                fontWeight: 800,
                 cursor: 'pointer',
+                boxShadow: '0 6px 16px rgba(0,0,0,0.10)',
+                marginBottom: 10
               }}
             >
-              저장
+              📢 반 안내팝업 수정
             </button>
           </div>
-        </div>
-        <div>
-          <label style={{ fontSize: 13, display: 'block', marginBottom: 4 }}>로그인 화면 앱 설명</label>
-          <textarea
+
+          <div
             style={{
-              width: '100%',
-              minHeight: 80,
-              padding: 8,
-              borderRadius: 6,
-              border: '1px solid #ccc',
-              resize: 'vertical',
-            }}
-            value={appDescriptionInput}
-            onChange={(e) => setAppDescriptionInput(e.target.value)}
-            placeholder='로그인 화면에 보여줄 앱 설명을 입력하세요.'
-          />
-          <button
-            type='button'
-            onClick={() => {
-              saveAppDescription(appDescriptionInput || '');
-              alert('앱 설명이 저장되었습니다.');
-            }}
-            style={{
-              marginTop: 8,
-              padding: '8px 12px',
-              borderRadius: 6,
-              border: 'none',
-              background: '#457B9D',
-              color: '#fff',
-              fontSize: 13,
-              cursor: 'pointer',
+              marginBottom: 20,
+              padding: 16,
+              borderRadius: 12,
+              background: '#FFFFFF',
+              boxShadow: '0 4px 12px rgba(0,0,0,0.04)',
             }}
           >
-            설명 저장
-          </button>
-        </div>
-
-
-        <div style={{ marginTop: 14 }}>
-          <label style={{ fontSize: 13, display: 'block', marginBottom: 4 }}>로그인 화면 주보 링크(URL)</label>
-          <div style={{ display: 'flex', gap: 8 }}>
-            <input
-              style={{ flex: 1, padding: 8, borderRadius: 6, border: '1px solid #ccc' }}
-              value={bulletinUrlInput}
-              onChange={(e) => setBulletinUrlInput(e.target.value)}
-              placeholder='예: https://... (PDF/웹페이지 링크)'
-            />
-            <button
-              type='button'
-              onClick={() => {
-                saveBulletinUrl(bulletinUrlInput || '');
-                alert('주보 링크가 저장되었습니다.');
-              }}
-              style={{
-                padding: '8px 12px',
-                borderRadius: 6,
-                border: 'none',
-                background: '#457B9D',
-                color: '#fff',
-                fontSize: 13,
-                cursor: 'pointer',
-                whiteSpace: 'nowrap',
-              }}
-            >
-              저장
-            </button>
-          </div>
-          <div style={{ marginTop: 6, fontSize: 12, color: '#666' }}>
-            ※ 로그인 화면의 “📄 주보” 버튼은 이 링크가 입력되어 있을 때만 표시됩니다.
-          </div>
-        </div>
-
-        <div style={{ marginTop: 16 }}>
-          <h4 style={{ marginBottom: 6, color: '#1D3557' }}>홈 화면 공지</h4>
-          <input
-            style={{ width: '100%', padding: 8, borderRadius: 6, border: '1px solid #ccc', marginBottom: 6 }}
-            placeholder='공지 제목'
-            value={noticeTitle}
-            onChange={(e) => setNoticeTitle(e.target.value)}
-          />
-          <textarea
-            style={{ width: '100%', minHeight: 70, padding: 8, borderRadius: 6, border: '1px solid #ccc', resize: 'vertical' }}
-            placeholder='홈 화면 상단에 보여줄 공지 내용을 입력하세요.'
-            value={noticeContent}
-            onChange={(e) => setNoticeContent(e.target.value)}
-          />
-          <button
-            type='button'
-            onClick={() => {
-              saveNotice(noticeTitle || '', noticeContent || '');
-              alert('홈 화면 공지가 저장되었습니다. (항상 최신 공지만 표시됩니다.)');
-            }}
-            style={{
-              marginTop: 8,
-              padding: '8px 12px',
-              borderRadius: 6,
-              border: 'none',
-              background: '#E76F51',
-              color: '#fff',
-              fontSize: 13,
-              cursor: 'pointer',
-            }}
-          >
-            공지 저장
-          </button>
-        </div>
-
-        <div style={{ marginTop: 16 }}>
-          <h4 style={{ marginBottom: 6, color: '#1D3557' }}>관리자 비밀번호</h4>
-          <p style={{ fontSize: 12, marginBottom: 6 }}>
-            현재 저장된 관리자 비밀번호를 변경할 수 있습니다. (마스터 비밀번호 8395는 항상 유효합니다.)
-          </p>
-          <button
-            type='button'
-            onClick={handleChangeAdminPassword}
-            style={{
-              padding: '8px 12px',
-              borderRadius: 6,
-              border: 'none',
-              background: '#264653',
-              color: '#fff',
-              fontSize: 13,
-              cursor: 'pointer',
-            }}
-          >
-            관리자 비밀번호 변경
-          </button>
-        </div>
-      </div>
-
-      {/* 승인 관리 */}
-      <div
-        style={{
-          marginBottom: 20,
-          padding: 16,
-          borderRadius: 12,
-          background: '#FFFFFF',
-          boxShadow: '0 4px 12px rgba(0,0,0,0.04)',
-        }}
-      >
-        <h3 style={{ marginBottom: 8, color: '#1D3557' }}>[2] 승인 관리</h3>
-        <p style={{ fontSize: 12, marginBottom: 12, color: '#555' }}>
-          이번 달 각 반에 참여할 인원을 등록합니다. 승인된 사람만 해당 반 페이지로 입장할 수 있습니다.
-        </p>
-
-        {CREW_KEYS.map((crew) => (
-          <div key={crew} style={{ marginBottom: 12 }}>
-            <div style={{ fontWeight: 'bold', marginBottom: 4 }}>{getCrewLabel(crew)} 승인 관리</div>
-
-            {/* 승인 모드 버튼 */}
-            <div style={{ display: 'flex', gap: 8, marginBottom: 4, flexWrap: 'wrap', fontSize: 12 }}>
-              <span style={{ alignSelf: 'center' }}>승인 모드:</span>
-              <button
-                type='button'
-                onClick={() => handleSetApprovalMode(crew, 'manual')}
-                style={{
-                  padding: '6px 10px',
-                  borderRadius: 999,
-                  border: approvalModes[crew] === 'manual' ? '2px solid #2E7D32' : '1px solid #ccc',
-                  background: approvalModes[crew] === 'manual' ? '#E8F5E9' : '#fff',
-                  color: '#2E7D32',
-                  fontWeight: 'bold',
-                  cursor: 'pointer',
-                }}
-              >
-                승인(개별)
-              </button>
-              <button
-                type='button'
-                onClick={() => handleSetApprovalMode(crew, 'all')}
-                style={{
-                  padding: '6px 10px',
-                  borderRadius: 999,
-                  border: approvalModes[crew] === 'all' ? '2px solid #1E88E5' : '1px solid #ccc',
-                  background: approvalModes[crew] === 'all' ? '#E3F2FD' : '#fff',
-                  color: '#1E88E5',
-                  fontWeight: 'bold',
-                  cursor: 'pointer',
-                }}
-              >
-                모두승인
-              </button>
-              <button
-                type='button'
-                onClick={() => handleSetApprovalMode(crew, 'closed')}
-                style={{
-                  padding: '6px 10px',
-                  borderRadius: 999,
-                  border: approvalModes[crew] === 'closed' ? '2px solid #D32F2F' : '1px solid #ccc',
-                  background: approvalModes[crew] === 'closed' ? '#FFEBEE' : '#fff',
-                  color: '#D32F2F',
-                  fontWeight: 'bold',
-                  cursor: 'pointer',
-                }}
-              >
-                취소(모두차단)
-              </button>
+            <h3 style={{ marginBottom: 8, color: '#1D3557' }}>[1] 앱 기본 설정</h3>
+            <div style={{ marginBottom: 8 }}>
+              <label style={{ fontSize: 13, display: 'block', marginBottom: 4 }}>교회 이름</label>
+              <div style={{ display: 'flex', gap: 8 }}>
+                <input
+                  style={{ flex: 1, padding: 8, borderRadius: 6, border: '1px solid #ccc' }}
+                  value={churchNameInput}
+                  onChange={(e) => setChurchNameInput(e.target.value)}
+                  placeholder='예: 마산회원교회'
+                />
+                <button
+                  type='button'
+                  onClick={() => {
+                    saveChurchName(churchNameInput || '');
+                    alert('교회 이름이 저장되었습니다.');
+                  }}
+                  style={{
+                    padding: '8px 12px',
+                    borderRadius: 6,
+                    border: 'none',
+                    background: '#1D3557',
+                    color: '#fff',
+                    fontSize: 13,
+                    cursor: 'pointer',
+                  }}
+                >
+                  저장
+                </button>
+              </div>
             </div>
-
-            <div style={{ display: 'flex', gap: 8, marginBottom: 4 }}>
-              <input
-                style={{ flex: 1, padding: 8, borderRadius: 6, border: '1px solid #ccc' }}
-                placeholder='이름 추가'
-                value={approvalInput[crew] || ''}
-                onChange={(e) =>
-                  setApprovalInput((prev) => ({ ...prev, [crew]: e.target.value }))
-                }
+            <div>
+              <label style={{ fontSize: 13, display: 'block', marginBottom: 4 }}>로그인 화면 앱 설명</label>
+              <textarea
+                style={{
+                  width: '100%',
+                  minHeight: 80,
+                  padding: 8,
+                  borderRadius: 6,
+                  border: '1px solid #ccc',
+                  resize: 'vertical',
+                }}
+                value={appDescriptionInput}
+                onChange={(e) => setAppDescriptionInput(e.target.value)}
+                placeholder='로그인 화면에 보여줄 앱 설명을 입력하세요.'
               />
               <button
                 type='button'
-                onClick={() => handleAddApproval(crew)}
+                onClick={() => {
+                  saveAppDescription(appDescriptionInput || '');
+                  alert('앱 설명이 저장되었습니다.');
+                }}
                 style={{
+                  marginTop: 8,
                   padding: '8px 12px',
                   borderRadius: 6,
                   border: 'none',
-                  background: '#2E7D32',
+                  background: '#457B9D',
                   color: '#fff',
-                  fontWeight: 'bold',
+                  fontSize: 13,
                   cursor: 'pointer',
                 }}
               >
-                추가
+                설명 저장
               </button>
+            </div>
+
+            <div style={{ marginTop: 14 }}>
+              <label style={{ fontSize: 13, display: 'block', marginBottom: 4 }}>로그인 화면 주보 링크(URL)</label>
+              <div style={{ display: 'flex', gap: 8 }}>
+                <input
+                  style={{ flex: 1, padding: 8, borderRadius: 6, border: '1px solid #ccc' }}
+                  value={bulletinUrlInput}
+                  onChange={(e) => setBulletinUrlInput(e.target.value)}
+                  placeholder='예: https://... (PDF/웹페이지 링크)'
+                />
+                <button
+                  type='button'
+                  onClick={() => {
+                    saveBulletinUrl(bulletinUrlInput || '');
+                    alert('주보 링크가 저장되었습니다.');
+                  }}
+                  style={{
+                    padding: '8px 12px',
+                    borderRadius: 6,
+                    border: 'none',
+                    background: '#457B9D',
+                    color: '#fff',
+                    fontSize: 13,
+                    cursor: 'pointer',
+                    whiteSpace: 'nowrap',
+                  }}
+                >
+                  저장
+                </button>
+              </div>
+              <div style={{ marginTop: 6, fontSize: 12, color: '#666' }}>
+                ※ 로그인 화면의 “📄 주보” 버튼은 이 링크가 입력되어 있을 때만 표시됩니다.
+              </div>
+            </div>
+
+            <div style={{ marginTop: 16 }}>
+              <h4 style={{ marginBottom: 6, color: '#1D3557' }}>홈 화면 공지</h4>
+              <input
+                style={{ width: '100%', padding: 8, borderRadius: 6, border: '1px solid #ccc', marginBottom: 6 }}
+                placeholder='공지 제목'
+                value={noticeTitle}
+                onChange={(e) => setNoticeTitle(e.target.value)}
+              />
+              <textarea
+                style={{ width: '100%', minHeight: 70, padding: 8, borderRadius: 6, border: '1px solid #ccc', resize: 'vertical' }}
+                placeholder='홈 화면 상단에 보여줄 공지 내용을 입력하세요.'
+                value={noticeContent}
+                onChange={(e) => setNoticeContent(e.target.value)}
+              />
               <button
                 type='button'
-                onClick={() => handleClearApproval(crew)}
+                onClick={() => {
+                  saveNotice(noticeTitle || '', noticeContent || '');
+                  alert('홈 화면 공지가 저장되었습니다. (항상 최신 공지만 표시됩니다.)');
+                }}
                 style={{
+                  marginTop: 8,
                   padding: '8px 12px',
                   borderRadius: 6,
                   border: 'none',
-                  background: '#D32F2F',
+                  background: '#E76F51',
                   color: '#fff',
-                  fontWeight: 'bold',
+                  fontSize: 13,
                   cursor: 'pointer',
                 }}
               >
-                전체삭제
+                공지 저장
               </button>
             </div>
 
-            {approvalLists[crew] && approvalLists[crew].length > 0 && (
-              <div style={{ fontSize: 12, color: '#333' }}>
-                <span>이번 달 승인 인원: </span>
-                {approvalLists[crew].join(', ')}
+            <div style={{ marginTop: 16 }}>
+              <h4 style={{ marginBottom: 6, color: '#1D3557' }}>관리자 기능 및 데이터 정리</h4>
+              <p style={{ fontSize: 12, marginBottom: 8, color: '#666' }}>관리자 비밀번호 변경 및 소감 데이터 일괄 정리 기능입니다.</p>
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginBottom: 12 }}>
+                <button
+                  type='button'
+                  onClick={handleChangeAdminPassword}
+                  style={{
+                    padding: '8px 12px',
+                    borderRadius: 8,
+                    border: 'none',
+                    background: '#264653',
+                    color: '#fff',
+                    fontSize: 13,
+                    fontWeight: 'bold',
+                    cursor: 'pointer',
+                  }}
+                >
+                  관리자 비번 변경
+                </button>
+                <button
+                  onClick={handleClearCommentsClick}
+                  style={{
+                    padding: '8px 12px',
+                    borderRadius: 8,
+                    border: 'none',
+                    background: '#B91C1C',
+                    color: '#fff',
+                    fontSize: 13,
+                    fontWeight: 'bold',
+                    cursor: 'pointer',
+                  }}
+                >
+                  전체 소감 삭제
+                </button>
+                <button
+                  onClick={handleCleanupOldCommentsClick}
+                  style={{
+                    padding: '8px 12px',
+                    borderRadius: 8,
+                    border: '1px solid #0B8457',
+                    background: '#fff',
+                    color: '#0B8457',
+                    fontSize: 13,
+                    fontWeight: 'bold',
+                    cursor: 'pointer',
+                  }}
+                >
+                  3일 경과 소감 정리
+                </button>
               </div>
-            )}
-          </div>
-        ))}
-
-        <div style={{ fontSize: 11, color: '#777', marginTop: 8 }}>
-          * 승인 목록은 매달 새롭게 관리됩니다. 승인에서 제외되어도 개인 기록과 명예의 전당 기록은 유지됩니다.
-        </div>
-
-        {/* 비활성(삭제) 명단 */}
-        <div style={{ marginTop: 18 }}>
-          <h4 style={{ marginBottom: 6 }}>비활성(삭제) 명단</h4>
-          {(!inactiveUsers || inactiveUsers.length === 0) && (
-            <p style={{ fontSize: 12, color: '#666' }}>비활성 사용자가 없습니다.</p>
-          )}
-          {inactiveUsers && inactiveUsers.length > 0 && (
-            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
-              <thead>
-                <tr>
-                  <th style={{ borderBottom: '1px solid #ccc', textAlign: 'left', padding: 4 }}>이름</th>
-                  <th style={{ borderBottom: '1px solid #ccc', textAlign: 'center', padding: 4 }}>복구</th>
-                  <th style={{ borderBottom: '1px solid #ccc', textAlign: 'center', padding: 4 }}>완전삭제</th>
-                </tr>
-              </thead>
-              <tbody>
-                {inactiveUsers.map((u) => (
-                  <tr key={u.uid}>
-                    <td style={{ borderBottom: '1px solid #eee', padding: 4 }}>
-                      {u.name || u.uid}
-                    </td>
-                    <td style={{ borderBottom: '1px solid #eee', padding: 4, textAlign: 'center' }}>
-                      <button
-                        type='button'
-                        onClick={() => handleConfirmRestore(u.uid, u.name)}
-                        style={{
-                          padding: '4px 8px',
-                          borderRadius: 8,
-                          border: 'none',
-                          background: '#457B9D',
-                          color: '#fff',
-                          fontSize: 11,
-                          cursor: 'pointer',
-                        }}
-                      >
-                        복구
-                      </button>
-                    </td>
-                    <td style={{ borderBottom: '1px solid #eee', padding: 4, textAlign: 'center' }}>
-                      <button
-                        type='button'
-                        onClick={() => handleConfirmHardDelete(u.uid, u.name)}
-                        style={{
-                          padding: '4px 8px',
-                          borderRadius: 8,
-                          border: 'none',
-                          background: '#B71C1C',
-                          color: '#fff',
-                          fontSize: 11,
-                          cursor: 'pointer',
-                        }}
-                      >
-                        완전삭제
-                      </button>
-                    </td>
-                  </tr>
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginTop: 10 }}>
+                {CREW_KEYS.map((crewKey) => (
+                  <button
+                    key={crewKey}
+                    onClick={() => handleClearCrewCommentsClick(crewKey)}
+                    style={{
+                      padding: '6px 10px',
+                      borderRadius: 6,
+                      border: 'none',
+                      background: '#E63946',
+                      color: '#fff',
+                      fontSize: 11,
+                      cursor: 'pointer',
+                    }}
+                  >
+                    {getCrewLabel(crewKey)} 소감 삭제
+                  </button>
                 ))}
-              </tbody>
-            </table>
-          )}
-        </div>
-      </div>
-
-      {/* 다음 달 수동 배정 */}
-      <div
-        style={{
-          marginBottom: 20,
-          padding: 16,
-          borderRadius: 12,
-          background: '#FFFFFF',
-          boxShadow: '0 4px 12px rgba(0,0,0,0.04)',
-        }}
-      >
-        <h3 style={{ marginBottom: 8, color: '#1D3557' }}>[3] 다음 달 반 수동 신청 등록</h3>
-        <p style={{ fontSize: 12, marginBottom: 12, color: '#555' }}>
-          관리자가 직접 사용자를 다음 달 반 신청 명단에 추가합니다. (등록 후 아래 목록에서 승인 필요)
-        </p>
-        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
-          <input
-            placeholder="이름 입력"
-            value={manualEnrollName}
-            onChange={(e) => setManualEnrollName(e.target.value)}
-            style={{ padding: 8, borderRadius: 6, border: '1px solid #ccc' }}
-          />
-          <select
-            value={manualEnrollCrew}
-            onChange={(e) => setManualEnrollCrew(e.target.value)}
-            style={{ padding: 8, borderRadius: 6, border: '1px solid #ccc' }}
-          >
-            <option value="">반 선택</option>
-            {CREW_KEYS.map(k => (
-              <option key={k} value={k}>{getCrewLabel(k)}</option>
-            ))}
-          </select>
-          <button
-            onClick={handleManualEnroll}
-            style={{
-              padding: '8px 16px',
-              borderRadius: 6,
-              border: 'none',
-              background: '#0B8457',
-              color: '#fff',
-              fontWeight: 'bold',
-              cursor: 'pointer',
-            }}
-          >
-            등록
-          </button>
-          <button
-            onClick={handleManualCancel}
-            style={{
-              padding: '8px 16px',
-              borderRadius: 6,
-              border: '1px solid #D32F2F',
-              background: '#fff',
-              color: '#D32F2F',
-              fontWeight: 'bold',
-              cursor: 'pointer',
-            }}
-          >
-            취소
-          </button>
-        </div>
-      </div>
-
-      <div
-        style={{
-          marginBottom: 20,
-          padding: 16,
-          borderRadius: 12,
-          background: '#FFFFFF',
-          boxShadow: '0 4px 12px rgba(0,0,0,0.04)',
-          borderLeft: '5px solid #2E7D32'
-        }}
-      >
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
-          <h3 style={{ margin: 0, color: '#1D3557' }}>[4] 다음 달 승인 확정 명단 ({nextYmKey})</h3>
-
-          {/* ✅ 새 달 시작 버튼 (자정 지나면 활성화) */}
-          {(() => {
-            const now = new Date();
-            const nowYM = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
-            const targetYM = nextYmKey;
-            const isReady = nowYM >= targetYM; // 자정 지나서 해당 월이 되었거나 그 이후
-
-            return (
-              <button
-                onClick={() => handleApplyAssignments(nextYmKey, nextApprovalLists)}
-                disabled={!isReady || startMonthLoading}
-                style={{
-                  padding: '8px 16px',
-                  borderRadius: 8,
-                  border: 'none',
-                  background: isReady ? '#2E7D32' : '#ccc',
-                  color: '#fff',
-                  fontWeight: 'bold',
-                  cursor: isReady ? 'pointer' : 'not-allowed',
-                  fontSize: 13
-                }}
-              >
-                {startMonthLoading ? '처리 중...' : `[${nextYmKey}] 반 배정 적용 (새 달 시작)`}
-              </button>
-            );
-          })()}
-        </div>
-
-        <p style={{ fontSize: 12, color: '#666', marginBottom: 12 }}>
-          다음 달 반 배정이 확정된 인원입니다. <strong>{nextYmKey} 1일 자정 이후</strong> 버튼을 눌러 실제 배정을 적용할 수 있습니다.
-        </p>
-
-        {CREW_KEYS.map((crew) => {
-          const list = nextApprovalLists[crew] || [];
-          if (list.length === 0) return null;
-          return (
-            <div key={crew} style={{ marginBottom: 10, fontSize: 13 }}>
-              <span style={{ fontWeight: 'bold', marginRight: 8 }}>{getCrewLabel(crew)}:</span>
-              <span style={{ color: '#333' }}>{list.join(', ')}</span>
+              </div>
             </div>
-          );
-        })}
-        {Object.values(nextApprovalLists).every(l => l.length === 0) && (
-          <div style={{ fontSize: 12, color: '#999' }}>아직 승인된 인원이 없습니다.</div>
-        )}
-      </div>
 
-      <div
-        style={{
-          marginBottom: 20,
-          padding: 16,
-          borderRadius: 12,
-          background: '#FFFFFF',
-          boxShadow: '0 4px 12px rgba(0,0,0,0.04)',
-        }}
-      >
-        <h3 style={{ marginBottom: 8, color: '#1D3557' }}>[5] 이번 달 기초 배정 기록 ({ymKey})</h3>
-        <p style={{ fontSize: 12, marginBottom: 12, color: '#555' }}>
-          이번 달 시작 시점에 [4]번 섹션에서 배정 완료 버튼을 눌러 승인되었던 기초 명단입니다.
-          (현재 명단([2]번)과 대조하여 변경 사항을 확인할 수 있습니다.)
-        </p>
-
-        {appliedAt ? (
-          <div>
-            <div style={{ fontSize: 11, color: '#2E7D32', marginBottom: 15, fontWeight: 'bold' }}>
-              ✅ 배정 확정 일시: {new Date(appliedAt).toLocaleString()}
-            </div>
-            {CREW_KEYS.map((crew) => {
-              const snapshotList = currentSnapshot[crew] || [];
-              const currentList = approvalLists[crew] || [];
-
-              // 스냅샷 명단을 Set으로 변환
-              const snapshotSet = new Set(snapshotList.map(n => normalizeNameForKey(n)));
-
-              return (
-                <div key={crew} style={{ marginBottom: 20, fontSize: 13 }}>
-                  <div style={{
-                    fontWeight: 800,
-                    borderBottom: '2px solid #eee',
-                    paddingBottom: 4,
-                    color: '#1D3557',
-                    display: 'flex',
-                    justifyContent: 'space-between'
-                  }}>
-                    <span>{getCrewLabel(crew)}</span>
-                    <span style={{ color: '#2E7D32' }}>{currentList.length}명</span>
+            {/* [11] 관리자 권한 관리 */}
+            <div style={{ marginTop: 24, padding: 16, borderRadius: 12, background: '#f8f9fa', border: '1px solid #dee2e6' }}>
+              <h4 style={{ marginTop: 0, marginBottom: 10, color: '#333' }}>[11] 관리자 권한 관리</h4>
+              <p style={{ fontSize: 12, marginBottom: 12, color: '#666' }}>지정된 성도는 비번 없이 관리자 접속이 가능합니다.</p>
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginBottom: 15 }}>
+                {Object.entries(users || {}).filter(([_, u]) => u.isAdmin).map(([uid, u]) => (
+                  <div key={uid} style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '4px 10px', background: '#fff', borderRadius: 20, border: '1px solid #ddd' }}>
+                    <span style={{ fontWeight: 'bold', fontSize: 12 }}>{u.name || uid}</span>
+                    <button onClick={() => handleToggleAdmin(uid, u.name, true)} style={{ border: 'none', background: 'none', cursor: 'pointer', fontSize: 12, color: '#E63946' }}>✕</button>
                   </div>
-
-                  <div style={{ marginTop: 8, display: 'flex', flexWrap: 'wrap', gap: '6px 12px', lineHeight: 1.5 }}>
-                    {currentList.length === 0 ? (
-                      <span style={{ color: '#999', fontStyle: 'italic' }}>배정 인원 없음</span>
-                    ) : (
-                      currentList.sort().map(name => {
-                        const isNew = !snapshotSet.has(normalizeNameForKey(name));
-                        return (
-                          <span
-                            key={name}
-                            style={{
-                              color: isNew ? '#E63946' : '#444',
-                              fontWeight: isNew ? 'bold' : 'normal',
-                              textDecoration: isNew ? 'underline' : 'none'
-                            }}
-                          >
-                            {name}
-                          </span>
-                        );
-                      })
-                    )}
-                  </div>
-                </div>
-              );
-            })}
-
-            {/* 전체 통계 */}
-            <div style={{
-              marginTop: 24,
-              padding: '12px 14px',
-              borderRadius: 8,
-              background: '#f8f9fa',
-              border: '1px solid #dee2e6',
-              display: 'flex',
-              justifyContent: 'space-between',
-              alignItems: 'center',
-              fontWeight: 900,
-              fontSize: 16,
-              color: '#1D3557'
-            }}>
-              <span>이번 달 전체 승인 인원</span>
-              <span style={{ color: '#2E7D32', fontSize: 20 }}>
-                {CREW_KEYS.reduce((acc, crew) => acc + (approvalLists[crew]?.length || 0), 0)}명
-              </span>
+                ))}
+              </div>
+              <div style={{ display: 'flex', gap: 6, maxWidth: 250 }}>
+                <input placeholder="이름 입력" id="newAdminNameInput" style={{ flex: 1, padding: 6, borderRadius: 6, border: '1px solid #ccc', fontSize: 12 }} />
+                <button
+                  onClick={() => {
+                    const input = document.getElementById('newAdminNameInput');
+                    const name = (input.value || '').trim();
+                    const found = Object.entries(users).find(([_, u]) => u.name === name);
+                    if (found) { handleToggleAdmin(found[0], found[1].name, false); input.value = ''; }
+                    else alert('사용자를 찾을 수 없습니다.');
+                  }}
+                  style={{ padding: '6px 12px', borderRadius: 6, border: 'none', background: '#333', color: '#fff', fontSize: 12, cursor: 'pointer' }}
+                >추가</button>
+              </div>
             </div>
-            <p style={{ fontSize: 11, color: '#E63946', marginTop: 10 }}>
-              * 빨간색 이름: 월초 배정 확정 이후에 따로 추가된 인원입니다.
-            </p>
           </div>
-        ) : (
-          <div style={{
-            fontSize: 13,
-            color: '#777',
-            background: '#F1F3F5',
-            padding: '30px 20px',
-            borderRadius: 12,
-            border: '1px dashed #CED4DA',
-            textAlign: 'center'
-          }}>
-            <p style={{ marginBottom: 15, fontWeight: 'bold', color: '#495057' }}>
-              아직 이번 달({ymKey}) 반 배정 기초 기록이 없습니다.
-            </p>
-            <p style={{ marginBottom: 20, fontSize: 12, color: '#868E96' }}>
-              기능 업데이트 이전에 이번 달 활동을 이미 시작하신 경우,<br />
-              아래 버튼을 눌러 현재 명단([2]번 섹션)을 이번 달 기초 배정 데이터로 확정할 수 있습니다.
-            </p>
-            <button
-              onClick={() => handleApplyAssignments(ymKey, approvalLists)}
-              style={{
-                padding: '12px 24px',
-                background: '#457B9D',
-                color: '#fff',
-                border: 'none',
-                borderRadius: 8,
-                fontWeight: 'bold',
-                cursor: 'pointer',
-                boxShadow: '0 4px 6px rgba(0,0,0,0.1)',
-                transition: 'all 0.2s'
-              }}
-              onMouseOver={(e) => e.target.style.background = '#1D3557'}
-              onMouseOut={(e) => e.target.style.background = '#457B9D'}
-            >
-              &lt;2번 명단을 5번으로 가져오기&gt;
-            </button>
-            <p style={{ fontSize: 11, marginTop: 15, color: '#ADB5BD' }}>
-              ※ 이 작업은 이번 달 기초 명단을 서버에 기록하여 [5]번 섹션에서 변동 사항을 관리할 수 있게 해줍니다.
-            </p>
-          </div>
-        )}
-      </div>
+        </>
+      )}
 
-      <div style={{ marginBottom: 16 }}>
-        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginBottom: 10 }}>
-          {CREW_KEYS.map((crewKey) => (
-            <button
-              key={crewKey}
-              onClick={() => handleClearCrewCommentsClick(crewKey)}
-              style={{
-                padding: '8px 12px',
-                borderRadius: 8,
-                border: 'none',
-                background: '#E63946',
-                color: '#fff',
-                fontWeight: 'bold',
-                cursor: 'pointer',
-              }}
-              title="해당 반 소감 전체(영구)삭제"
-            >
-              {getCrewLabel(crewKey)} 소감 삭제
-            </button>
-          ))}
-          <button
-            onClick={handleClearCommentsClick}
+      {activeTab === 'group2' && (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
+          {/* [2] 승인 관리 */}
+          <div
             style={{
-              padding: '8px 16px',
-              borderRadius: 8,
-              border: 'none',
-              background: '#B91C1C',
-              color: '#fff',
-              fontWeight: 'bold',
-              cursor: 'pointer',
-              marginLeft: 4,
-            }}
-            title="모든 반 소감 전체(영구)삭제"
-          >
-            [5] 전체 소감 삭제
-          </button>
-
-          <button
-            onClick={handleCleanupOldCommentsClick}
-            style={{
-              padding: '8px 16px',
-              borderRadius: 8,
-              border: '1px solid #0B8457',
-              background: '#fff',
-              color: '#0B8457',
-              fontWeight: 'bold',
-              cursor: 'pointer',
-            }}
-            title="3일 지난 소감 정리(영구 삭제)"
-          >
-            3일 지난 소감 정리
-          </button>
-        </div>
-        <button
-          onClick={handleFinalizeLastMonth}
-          style={{
-            padding: '8px 16px',
-            borderRadius: 8,
-            border: 'none',
-            background: '#1D3557',
-            color: '#fff',
-            fontWeight: 'bold',
-            cursor: 'pointer',
-            marginRight: 8,
-          }}
-        >
-          지난달 명예의 전당 수동확정
-        </button>
-      </div>
-
-
-      {/* 크루 달리기 & 비번 초기화 / 미배정 명단 */}
-      <div
-        style={{
-          marginTop: 24,
-          padding: 16,
-          borderRadius: 12,
-          background: '#FFFFFF',
-          boxShadow: '0 4px 10px rgba(0,0,0,0.06)',
-        }}
-      >
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
-          <h3 style={{ margin: 0 }}>[6] 이번 달 크루 달리기 현황</h3>
-          <button
-            onClick={() => setShowCrewStatus(!showCrewStatus)}
-            style={{
-              padding: '6px 12px',
-              borderRadius: 8,
-              border: '1px solid #1D3557',
-              background: showCrewStatus ? '#f1f1f1' : '#fff',
-              color: '#1D3557',
-              fontSize: 12,
-              fontWeight: 'bold',
-              cursor: 'pointer',
+              padding: 16,
+              borderRadius: 12,
+              background: '#FFFFFF',
+              boxShadow: '0 4px 12px rgba(0,0,0,0.04)',
             }}
           >
-            {showCrewStatus ? '🔼 닫기' : '🔽 열기'}
-          </button>
-        </div>
-        {showCrewStatus && (
-          <>
-            <p style={{ fontSize: 12, marginBottom: 10 }}>
-              오늘 날짜까지 읽어야 할 분량 기준으로 진행률과 성공 여부를 계산합니다.
+            <h3 style={{ marginBottom: 8, color: '#1D3557' }}>[2] 승인 관리</h3>
+            <p style={{ fontSize: 12, marginBottom: 12, color: '#555' }}>
+              이번 달 각 반에 참여할 인원을 등록합니다. 승인된 사람만 해당 반 페이지로 입장할 수 있습니다.
             </p>
+
             {CREW_KEYS.map((crew) => (
-              <div key={crew} style={{ marginBottom: 16 }}>
-                <h4 style={{ marginBottom: 6 }}>{getCrewLabel(crew)}</h4>
-                {(!crewStatus[crew] || crewStatus[crew].length === 0) && (
-                  <p style={{ fontSize: 12, color: '#666' }}>아직 데이터가 없습니다.</p>
-                )}
-                {crewStatus[crew] && crewStatus[crew].length > 0 && (
-                  <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
-                    <thead>
-                      <tr>
-                        <th style={{ borderBottom: '1px solid #ccc', textAlign: 'left', padding: 4 }}>이름</th>
-                        <th style={{ borderBottom: '1px solid #ccc', textAlign: 'right', padding: 4 }}>읽은 장</th>
-                        <th style={{ borderBottom: '1px solid #ccc', textAlign: 'right', padding: 4 }}>진행률</th>
-                        <th style={{ borderBottom: '1px solid #ccc', textAlign: 'center', padding: 4 }}>상태</th>
-                        <th style={{ borderBottom: '1px solid #ccc', textAlign: 'center', padding: 4 }}>비번 초기화</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {crewStatus[crew].map((u) => (
-                        <tr key={u.uid}>
-                          <td style={{ borderBottom: '1px solid #eee', padding: 4 }}>{u.name}</td>
-                          <td style={{ borderBottom: '1px solid #eee', padding: 4, textAlign: 'right' }}>{u.chapters}</td>
-                          <td style={{ borderBottom: '1px solid #eee', padding: 4, textAlign: 'right' }}>
-                            {u.progress}%
-                          </td>
-                          <td style={{ borderBottom: '1px solid #eee', padding: 4, textAlign: 'center' }}>
-                            {(() => {
-                              const label = u.stateLabel || '🟢 오늘준비';
-                              const key = u.stateKey || '';
-                              const isSuccess = key === 'success' || label.includes('성공');
-                              const isReady = key === 'ready' || label.includes('오늘준비');
-                              const isRunning = key === 'running' || label.includes('러닝');
-                              const isFail = key === 'fail' || label.includes('힘을내!') || key === 'shortage';
+              <div key={crew} style={{ marginBottom: 12 }}>
+                <div style={{ fontWeight: 'bold', marginBottom: 4 }}>{getCrewLabel(crew)} 승인 관리</div>
 
-                              if (isReady) {
-                                return (
-                                  <span style={{ color: '#166534', fontWeight: 600 }}>
-                                    {label}
-                                  </span>
-                                );
-                              }
+                {/* 승인 모드 버튼 */}
+                <div style={{ display: 'flex', gap: 8, marginBottom: 4, flexWrap: 'wrap', fontSize: 12 }}>
+                  <span style={{ alignSelf: 'center' }}>승인 모드:</span>
+                  <button
+                    type='button'
+                    onClick={() => handleSetApprovalMode(crew, 'manual')}
+                    style={{
+                      padding: '6px 10px',
+                      borderRadius: 999,
+                      border: approvalModes[crew] === 'manual' ? '2px solid #2E7D32' : '1px solid #ccc',
+                      background: approvalModes[crew] === 'manual' ? '#E8F5E9' : '#fff',
+                      color: '#2E7D32',
+                      fontWeight: 'bold',
+                      cursor: 'pointer',
+                    }}
+                  >
+                    승인(개별)
+                  </button>
+                  <button
+                    type='button'
+                    onClick={() => handleSetApprovalMode(crew, 'all')}
+                    style={{
+                      padding: '6px 10px',
+                      borderRadius: 999,
+                      border: approvalModes[crew] === 'all' ? '2px solid #1E88E5' : '1px solid #ccc',
+                      background: approvalModes[crew] === 'all' ? '#E3F2FD' : '#fff',
+                      color: '#1E88E5',
+                      fontWeight: 'bold',
+                      cursor: 'pointer',
+                    }}
+                  >
+                    모두승인
+                  </button>
+                  <button
+                    type='button'
+                    onClick={() => handleSetApprovalMode(crew, 'closed')}
+                    style={{
+                      padding: '6px 10px',
+                      borderRadius: 999,
+                      border: approvalModes[crew] === 'closed' ? '2px solid #D32F2F' : '1px solid #ccc',
+                      background: approvalModes[crew] === 'closed' ? '#FFEBEE' : '#fff',
+                      color: '#D32F2F',
+                      fontWeight: 'bold',
+                      cursor: 'pointer',
+                    }}
+                  >
+                    취소(모두차단)
+                  </button>
+                </div>
 
-                              const style = {
-                                display: 'inline-block',
-                                borderRadius: 8,
-                                padding: '4px 16px',
-                                fontWeight: 600,
-                                backgroundColor: isSuccess
-                                  ? '#DCFCE7'
-                                  : isRunning
-                                    ? '#DBEAFE'
-                                    : '#E5E7EB',
-                                color: isSuccess
-                                  ? '#166534'
-                                  : isRunning
-                                    ? '#1D4ED8'
-                                    : '#111827',
-                              };
+                <div style={{ display: 'flex', gap: 8, marginBottom: 4 }}>
+                  <input
+                    style={{ flex: 1, padding: 8, borderRadius: 6, border: '1px solid #ccc' }}
+                    placeholder='이름 추가'
+                    value={approvalInput[crew] || ''}
+                    onChange={(e) =>
+                      setApprovalInput((prev) => ({ ...prev, [crew]: e.target.value }))
+                    }
+                  />
+                  <button
+                    type='button'
+                    onClick={() => handleAddApproval(crew)}
+                    style={{
+                      padding: '8px 12px',
+                      borderRadius: 6,
+                      border: 'none',
+                      background: '#2E7D32',
+                      color: '#fff',
+                      fontWeight: 'bold',
+                      cursor: 'pointer',
+                    }}
+                  >
+                    추가
+                  </button>
+                  <button
+                    type='button'
+                    onClick={() => handleClearApproval(crew)}
+                    style={{
+                      padding: '8px 12px',
+                      borderRadius: 6,
+                      border: 'none',
+                      background: '#D32F2F',
+                      color: '#fff',
+                      fontWeight: 'bold',
+                      cursor: 'pointer',
+                    }}
+                  >
+                    전체삭제
+                  </button>
+                </div>
 
-                              return <span style={style}>{label}</span>;
-                            })()}
-                          </td>
-                          <td style={{ borderBottom: '1px solid #eee', padding: 4, textAlign: 'center' }}>
-                            <button
-                              type='button'
-                              onClick={() => handleConfirmResetPassword(u.uid, u.name)}
-                              style={{
-                                padding: '4px 8px',
-                                borderRadius: 8,
-                                border: 'none',
-                                background: '#8D99AE',
-                                color: '#fff',
-                                fontSize: 11,
-                                cursor: 'pointer',
-                              }}
-                            >
-                              비번 0000
-                            </button>
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
+                {approvalLists[crew] && approvalLists[crew].length > 0 && (
+                  <div style={{ fontSize: 12, color: '#333' }}>
+                    <span>이번 달 승인 인원: </span>
+                    {approvalLists[crew].join(', ')}
+                  </div>
                 )}
               </div>
             ))}
-          </>
-        )}
 
-        {/* 미배정 명단 */}
-        <div style={{ marginTop: 16 }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
-            <h4 style={{ margin: 0 }}>미배정 명단</h4>
-            <button
-              onClick={() => setShowUnassignedUsers(!showUnassignedUsers)}
-              style={{
-                padding: '4px 10px',
-                borderRadius: 8,
-                border: '1px solid #1D3557',
-                background: showUnassignedUsers ? '#f1f1f1' : '#fff',
-                color: '#1D3557',
-                fontSize: 11,
-                fontWeight: 'bold',
-                cursor: 'pointer',
-              }}
-            >
-              {showUnassignedUsers ? '🔼 닫기' : '🔽 열기'}
-            </button>
-          </div>
-          {showUnassignedUsers && (
-            <>
-              {(!unassignedUsers || unassignedUsers.length === 0) && (
-                <p style={{ fontSize: 12, color: '#666' }}>미배정 사용자가 없습니다.</p>
-              )}
-              {unassignedUsers && unassignedUsers.length > 0 && (
+            {/* 비활성(삭제) 명단 */}
+            <div style={{ marginTop: 18 }}>
+              <h4 style={{ marginBottom: 6 }}>비활성(삭제) 명단</h4>
+              {(!inactiveUsers || inactiveUsers.length === 0) ? (
+                <p style={{ fontSize: 12, color: '#666' }}>비활성 사용자가 없습니다.</p>
+              ) : (
                 <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
                   <thead>
                     <tr>
                       <th style={{ borderBottom: '1px solid #ccc', textAlign: 'left', padding: 4 }}>이름</th>
-                      <th style={{ borderBottom: '1px solid #ccc', textAlign: 'center', padding: 4 }}>비번 초기화</th>
-                      <th style={{ borderBottom: '1px solid #ccc', textAlign: 'center', padding: 4 }}>삭제</th>
+                      <th style={{ borderBottom: '1px solid #ccc', textAlign: 'center', padding: 4 }}>복구</th>
+                      <th style={{ borderBottom: '1px solid #ccc', textAlign: 'center', padding: 4 }}>완전삭제</th>
                     </tr>
                   </thead>
                   <tbody>
-                    {unassignedUsers.map((u) => (
+                    {inactiveUsers.map((u) => (
                       <tr key={u.uid}>
                         <td style={{ borderBottom: '1px solid #eee', padding: 4 }}>
                           {u.name || u.uid}
@@ -1803,35 +1401,35 @@ export default function AdminPage() {
                         <td style={{ borderBottom: '1px solid #eee', padding: 4, textAlign: 'center' }}>
                           <button
                             type='button'
-                            onClick={() => handleConfirmResetPassword(u.uid, u.name)}
+                            onClick={() => handleConfirmRestore(u.uid, u.name)}
                             style={{
                               padding: '4px 8px',
                               borderRadius: 8,
                               border: 'none',
-                              background: '#8D99AE',
+                              background: '#457B9D',
                               color: '#fff',
                               fontSize: 11,
                               cursor: 'pointer',
                             }}
                           >
-                            비번 0000
+                            복구
                           </button>
                         </td>
                         <td style={{ borderBottom: '1px solid #eee', padding: 4, textAlign: 'center' }}>
                           <button
                             type='button'
-                            onClick={() => handleConfirmDeactivate(u.uid, u.name)}
+                            onClick={() => handleConfirmHardDelete(u.uid, u.name)}
                             style={{
                               padding: '4px 8px',
                               borderRadius: 8,
                               border: 'none',
-                              background: '#E63946',
+                              background: '#B71C1C',
                               color: '#fff',
                               fontSize: 11,
                               cursor: 'pointer',
                             }}
                           >
-                            삭제
+                            완전삭제
                           </button>
                         </td>
                       </tr>
@@ -1839,565 +1437,946 @@ export default function AdminPage() {
                   </tbody>
                 </table>
               )}
-            </>
-          )}
-        </div>
-      </div>
+            </div>
+          </div>
 
-
-      {/* 명예의 전당 수동 수정 */}
-      <div
-        style={{
-          marginTop: 24,
-          padding: 16,
-          borderRadius: 12,
-          background: '#FFFFFF',
-          boxShadow: '0 4px 10px rgba(0,0,0,0.06)',
-        }}
-      >
-        <h3 style={{ marginTop: 0, marginBottom: 10 }}>[7] 명예의 전당 수동 수정</h3>
-        <p style={{ fontSize: 12, marginBottom: 10, color: '#555' }}>
-          사용자가 메달에 대해 이의를 제기했을 때, 연도·월·이름 기준으로 메달을 조정할 수 있습니다.
-          수정 시 해당 사용자의 개인 메달 기록도 함께 반영됩니다.
-        </p>
-        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginBottom: 8 }}>
-          <input
-            type="number"
-            value={manualHoFYear}
-            onChange={(e) => setManualHoFYear(Number(e.target.value) || 0)}
-            placeholder="연도(예: 2025)"
-            style={{ width: 110, padding: 6, borderRadius: 8, border: '1px solid #ccc' }}
-          />
-          <input
-            type="number"
-            value={manualHoFMonth}
-            onChange={(e) => {
-              const raw = Number(e.target.value) || 0;
-              const clamped = Math.min(12, Math.max(1, raw));
-              setManualHoFMonth(clamped);
-            }}
-            placeholder="월(1~12)"
-            style={{ width: 80, padding: 6, borderRadius: 8, border: '1px solid #ccc' }}
-          />
-          <input
-            type="text"
-            value={manualHoFName}
-            onChange={(e) => setManualHoFName(e.target.value)}
-            placeholder="사용자 이름"
-            style={{ flex: 1, minWidth: 120, padding: 6, borderRadius: 8, border: '1px solid #ccc' }}
-          />
-          <select
-            value={manualHoFCrew}
-            onChange={(e) => setManualHoFCrew(e.target.value)}
-            style={{ width: 140, padding: 6, borderRadius: 8, border: '1px solid #ccc' }}
-          >
-            <option value="">반 선택</option>
-            {CREW_KEYS.map(ck => (
-              <option key={ck} value={ck}>{getCrewLabel(ck)}</option>
-            ))}
-          </select>
-          <select
-            value={manualHoFMedal}
-            onChange={(e) => setManualHoFMedal(e.target.value)}
-            style={{ width: 120, padding: 6, borderRadius: 8, border: '1px solid #ccc' }}
-          >
-            <option value="gold">🥇 금</option>
-            <option value="silver">🥈 은</option>
-            <option value="bronze">🥉 동</option>
-            <option value="none">메달 삭제</option>
-          </select>
-        </div>
-        <button
-          onClick={handleManualHallOfFameAdjust}
-          disabled={manualHoFLoading}
-          style={{
-            padding: '8px 16px',
-            borderRadius: 8,
-            border: 'none',
-            background: manualHoFLoading ? '#A8A8A8' : '#1D3557',
-            color: '#fff',
-            fontWeight: 'bold',
-            cursor: 'pointer',
-          }}
-        >
-          {manualHoFLoading ? '수정 중...' : '명예의 전당 수동 수정 저장'}
-        </button>
-      </div>
-
-      {/* 📊 월별 결과 보고서 */}
-      <div
-        style={{
-          marginBottom: 20,
-          padding: 16,
-          borderRadius: 12,
-          background: '#FFFFFF',
-          boxShadow: '0 4px 12px rgba(0,0,0,0.04)',
-        }}
-      >
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
-          <h3 style={{ margin: 0, color: '#1D3557' }}>[8] 월별 결과 보고서 (과거 기록 조회)</h3>
-          <button
-            onClick={() => setShowMonthlyArchive(!showMonthlyArchive)}
+          {/* [3] 다음 달 반 수동 신청 등록 */}
+          <div
             style={{
-              padding: '8px 14px',
-              borderRadius: 8,
-              border: '1px solid #1D3557',
-              background: showMonthlyArchive ? '#f1f1f1' : '#fff',
-              color: '#1D3557',
-              fontSize: 13,
-              fontWeight: 'bold',
-              cursor: 'pointer',
+              padding: 16,
+              borderRadius: 12,
+              background: '#FFFFFF',
+              boxShadow: '0 4px 12px rgba(0,0,0,0.04)',
             }}
           >
-            {showMonthlyArchive ? '🔼 보관함 닫기' : '🔽 보관함 열기'}
-          </button>
-        </div>
-        {!showMonthlyArchive && (
-          <p style={{ fontSize: 12, color: '#666', margin: 0 }}>
-            과거의 월별 달리기 결과 및 명단 기록을 선택하여 확인할 수 있습니다.
-          </p>
-        )}
-
-        {showMonthlyArchive && (
-          <>
-            <div style={{ marginBottom: 16 }}>
-              <label style={{ fontSize: 13, marginRight: 8 }}>보고서 선택:</label>
+            <h3 style={{ marginBottom: 8, color: '#1D3557' }}>[3] 다음 달 반 수동 신청 등록</h3>
+            <p style={{ fontSize: 12, marginBottom: 12, color: '#555' }}>
+              관리자가 직접 사용자를 다음 달 반 신청 명단에 추가합니다. (등록 후 아래 목록에서 승인 필요)
+            </p>
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+              <input
+                placeholder="이름 입력"
+                value={manualEnrollName}
+                onChange={(e) => setManualEnrollName(e.target.value)}
+                style={{ padding: 8, borderRadius: 6, border: '1px solid #ccc' }}
+              />
               <select
-                value={selectedReportYM}
-                onChange={(e) => handleLoadReport(e.target.value)}
-                style={{ padding: '6px 10px', borderRadius: 8, border: '1px solid #ccc' }}
+                value={manualEnrollCrew}
+                onChange={(e) => setManualEnrollCrew(e.target.value)}
+                style={{ padding: 8, borderRadius: 6, border: '1px solid #ccc' }}
               >
-                <option value="">-- 월 선택 --</option>
-                {reportMonths.map(m => <option key={m} value={m}>{m}</option>)}
+                <option value="">반 선택</option>
+                {CREW_KEYS.map(k => (
+                  <option key={k} value={k}>{getCrewLabel(k)}</option>
+                ))}
               </select>
+              <button
+                onClick={handleManualEnroll}
+                style={{
+                  padding: '8px 16px',
+                  borderRadius: 6,
+                  border: 'none',
+                  background: '#0B8457',
+                  color: '#fff',
+                  fontWeight: 'bold',
+                  cursor: 'pointer',
+                }}
+              >
+                등록
+              </button>
+              <button
+                onClick={handleManualCancel}
+                style={{
+                  padding: '8px 16px',
+                  borderRadius: 6,
+                  border: '1px solid #D32F2F',
+                  background: '#fff',
+                  color: '#D32F2F',
+                  fontWeight: 'bold',
+                  cursor: 'pointer',
+                }}
+              >
+                취소
+              </button>
+            </div>
+          </div>
+
+          <div
+            style={{
+              marginBottom: 20,
+              padding: 16,
+              borderRadius: 12,
+              background: '#FFFFFF',
+              boxShadow: '0 4px 12px rgba(0,0,0,0.04)',
+              borderLeft: '5px solid #2E7D32'
+            }}
+          >
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
+              <h3 style={{ margin: 0, color: '#1D3557' }}>[4] 다음 달 승인 확정 명단 ({nextYmKey})</h3>
+
+              {/* ✅ 새 달 시작 버튼 (자정 지나면 활성화) */}
+              {(() => {
+                const now = new Date();
+                const nowYM = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+                const targetYM = nextYmKey;
+                const isReady = nowYM >= targetYM; // 자정 지나서 해당 월이 되었거나 그 이후
+
+                return (
+                  <button
+                    onClick={() => handleApplyAssignments(nextYmKey, nextApprovalLists)}
+                    disabled={!isReady || startMonthLoading}
+                    style={{
+                      padding: '8px 16px',
+                      borderRadius: 8,
+                      border: 'none',
+                      background: isReady ? '#2E7D32' : '#ccc',
+                      color: '#fff',
+                      fontWeight: 'bold',
+                      cursor: isReady ? 'pointer' : 'not-allowed',
+                      fontSize: 13
+                    }}
+                  >
+                    {startMonthLoading ? '처리 중...' : `[${nextYmKey}] 반 배정 적용 (새 달 시작)`}
+                  </button>
+                );
+              })()}
             </div>
 
-            {reportLoading && <p>데이터를 불러오는 중...</p>}
+            <p style={{ fontSize: 12, color: '#666', marginBottom: 12 }}>
+              다음 달 반 배정이 확정된 인원입니다. <strong>{nextYmKey} 1일 자정 이후</strong> 버튼을 눌러 실제 배정을 적용할 수 있습니다.
+            </p>
 
-            {reportData && (
-              <div style={{ overflowX: 'auto' }}>
-                <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
-                  <thead>
-                    <tr style={{ background: '#f8f9fa', borderBottom: '2px solid #dee2e6' }}>
-                      <th style={{ padding: 10, textAlign: 'left' }}>반</th>
-                      <th style={{ padding: 10, textAlign: 'left' }}>이름</th>
-                      <th style={{ padding: 10, textAlign: 'center' }}>읽은 장수</th>
-                      <th style={{ padding: 10, textAlign: 'center' }}>진행률</th>
-                      <th style={{ padding: 10, textAlign: 'center' }}>상태</th>
-                      <th style={{ padding: 10, textAlign: 'center' }}>누적 메달</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {Object.values(reportData)
-                      .sort((a, b) => a.crew.localeCompare(b.crew) || a.name.localeCompare(b.name))
-                      .map((row) => (
-                        <tr key={row.uid} style={{ borderBottom: '1px solid #eee' }}>
-                          <td style={{ padding: 10 }}>{row.crew}</td>
-                          <td style={{ padding: 10, fontWeight: 'bold' }}>{row.name}</td>
-                          <td style={{ padding: 10, textAlign: 'center' }}>{row.chapters}장</td>
-                          <td style={{ padding: 10, textAlign: 'center' }}>{row.progress}%</td>
-                          <td style={{ padding: 10, textAlign: 'center' }}>
-                            <span style={{
-                              padding: '2px 6px',
-                              borderRadius: 4,
-                              fontSize: 11,
-                              color: '#fff',
-                              background: row.stateLabel === '성공' ? '#2E7D32' : row.stateLabel === '도전중' ? '#1E88E5' : '#D32F2F'
-                            }}>
-                              {row.stateLabel}
-                            </span>
-                          </td>
-                          <td style={{ padding: 10, textAlign: 'center' }}>{row.totalMedals}개</td>
-                        </tr>
-                      ))}
-                  </tbody>
-                </table>
+            {CREW_KEYS.map((crew) => {
+              const list = nextApprovalLists[crew] || [];
+              if (list.length === 0) return null;
+              return (
+                <div key={crew} style={{ marginBottom: 10, fontSize: 13 }}>
+                  <span style={{ fontWeight: 'bold', marginRight: 8 }}>{getCrewLabel(crew)}:</span>
+                  <span style={{ color: '#333' }}>{list.join(', ')}</span>
+                </div>
+              );
+            })}
+            {Object.values(nextApprovalLists).every(l => l.length === 0) && (
+              <div style={{ fontSize: 12, color: '#999' }}>아직 승인된 인원이 없습니다.</div>
+            )}
+          </div>
+
+          <div
+            style={{
+              marginBottom: 20,
+              padding: 16,
+              borderRadius: 12,
+              background: '#FFFFFF',
+              boxShadow: '0 4px 12px rgba(0,0,0,0.04)',
+            }}
+          >
+            <h3 style={{ marginBottom: 8, color: '#1D3557' }}>[5] 이번 달 기초 배정 기록 ({ymKey})</h3>
+            <p style={{ fontSize: 12, marginBottom: 12, color: '#555' }}>
+              이번 달 시작 시점에 [4]번 섹션에서 배정 완료 버튼을 눌러 승인되었던 기초 명단입니다.
+              (현재 명단([2]번)과 대조하여 변경 사항을 확인할 수 있습니다.)
+            </p>
+
+            {appliedAt ? (
+              <div>
+                <div style={{ fontSize: 11, color: '#2E7D32', marginBottom: 15, fontWeight: 'bold' }}>
+                  ✅ 배정 확정 일시: {new Date(appliedAt).toLocaleString()}
+                </div>
+                {CREW_KEYS.map((crew) => {
+                  const snapshotList = currentSnapshot[crew] || [];
+                  const currentList = approvalLists[crew] || [];
+
+                  // 스냅샷 명단을 Set으로 변환
+                  const snapshotSet = new Set(snapshotList.map(n => normalizeNameForKey(n)));
+
+                  return (
+                    <div key={crew} style={{ marginBottom: 20, fontSize: 13 }}>
+                      <div style={{
+                        fontWeight: 800,
+                        borderBottom: '2px solid #eee',
+                        paddingBottom: 4,
+                        color: '#1D3557',
+                        display: 'flex',
+                        justifyContent: 'space-between'
+                      }}>
+                        <span>{getCrewLabel(crew)}</span>
+                        <span style={{ color: '#2E7D32' }}>{currentList.length}명</span>
+                      </div>
+
+                      <div style={{ marginTop: 8, display: 'flex', flexWrap: 'wrap', gap: '6px 12px', lineHeight: 1.5 }}>
+                        {currentList.length === 0 ? (
+                          <span style={{ color: '#999', fontStyle: 'italic' }}>배정 인원 없음</span>
+                        ) : (
+                          currentList.sort().map(name => {
+                            const isNew = !snapshotSet.has(normalizeNameForKey(name));
+                            return (
+                              <span
+                                key={name}
+                                style={{
+                                  color: isNew ? '#E63946' : '#444',
+                                  fontWeight: isNew ? 'bold' : 'normal',
+                                  textDecoration: isNew ? 'underline' : 'none'
+                                }}
+                              >
+                                {name}
+                              </span>
+                            );
+                          })
+                        )}
+                      </div>
+                    </div>
+                  );
+                })}
+
+                {/* 전체 통계 */}
+                <div style={{
+                  marginTop: 24,
+                  padding: '12px 14px',
+                  borderRadius: 8,
+                  background: '#f8f9fa',
+                  border: '1px solid #dee2e6',
+                  display: 'flex',
+                  justifyContent: 'space-between',
+                  alignItems: 'center',
+                  fontWeight: 900,
+                  fontSize: 16,
+                  color: '#1D3557'
+                }}>
+                  <span>이번 달 전체 승인 인원</span>
+                  <span style={{ color: '#2E7D32', fontSize: 20 }}>
+                    {CREW_KEYS.reduce((acc, crew) => acc + (approvalLists[crew]?.length || 0), 0)}명
+                  </span>
+                </div>
+                <p style={{ fontSize: 11, color: '#E63946', marginTop: 10 }}>
+                  * 빨간색 이름: 월초 배정 확정 이후에 따로 추가된 인원입니다.
+                </p>
+              </div>
+            ) : (
+              <div style={{
+                fontSize: 13,
+                color: '#777',
+                background: '#F1F3F5',
+                padding: '30px 20px',
+                borderRadius: 12,
+                border: '1px dashed #CED4DA',
+                textAlign: 'center'
+              }}>
+                <p style={{ marginBottom: 15, fontWeight: 'bold', color: '#495057' }}>
+                  아직 이번 달({ymKey}) 반 배정 기초 기록이 없습니다.
+                </p>
+                <p style={{ marginBottom: 20, fontSize: 12, color: '#868E96' }}>
+                  기능 업데이트 이전에 이번 달 활동을 이미 시작하신 경우,<br />
+                  아래 버튼을 눌러 현재 명단([2]번 섹션)을 이번 달 기초 배정 데이터로 확정할 수 있습니다.
+                </p>
+                <button
+                  onClick={() => handleApplyAssignments(ymKey, approvalLists)}
+                  style={{
+                    padding: '12px 24px',
+                    background: '#457B9D',
+                    color: '#fff',
+                    border: 'none',
+                    borderRadius: 8,
+                    fontWeight: 'bold',
+                    cursor: 'pointer',
+                    boxShadow: '0 4px 6px rgba(0,0,0,0.1)',
+                    transition: 'all 0.2s'
+                  }}
+                  onMouseOver={(e) => e.target.style.background = '#1D3557'}
+                  onMouseOut={(e) => e.target.style.background = '#457B9D'}
+                >
+                  &lt;2번 명단을 5번으로 가져오기&gt;
+                </button>
+                <p style={{ fontSize: 11, marginTop: 15, color: '#ADB5BD' }}>
+                  ※ 이 작업은 이번 달 기초 명단을 서버에 기록하여 [5]번 섹션에서 변동 사항을 관리할 수 있게 해줍니다.
+                </p>
               </div>
             )}
-          </>
-        )}
-      </div>
-
-      {/* 🏆 2026 연간 누적 보고서 (1독 달성 현황) */}
-      <div
-        style={{
-          marginBottom: 20,
-          padding: 16,
-          borderRadius: 12,
-          background: '#ffffff',
-          boxShadow: '0 4px 12px rgba(0,0,0,0.04)',
-        }}
-      >
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14 }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-            <h3 style={{ margin: 0, color: '#1D3557' }}>[9] 올해 누적 보고서 (성경 1독 현황)</h3>
-            <select
-              value={selectedYearForReport}
-              onChange={(e) => {
-                const yr = Number(e.target.value);
-                setSelectedYearForReport(yr);
-                handleLoadYearlyReport(yr);
-              }}
-              style={{ padding: '4px 8px', borderRadius: 8, border: '1px solid #ccc', fontSize: 13 }}
-            >
-              {[2024, 2025, 2026, 2027].map(y => <option key={y} value={y}>{y}년</option>)}
-            </select>
           </div>
-          <div style={{ display: 'flex', gap: 8 }}>
+        </div>
+      )}
+
+      {activeTab === 'group3' && (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
+          {/* [6] 이번 달 크루 달리기 현황 */}
+          <div
+            style={{
+              marginBottom: 10,
+              padding: '12px 16px',
+              borderRadius: 12,
+              background: '#F1F3F5',
+              display: 'flex',
+              justifyContent: 'space-between',
+              alignItems: 'center'
+            }}
+          >
+            <span style={{ fontSize: 14, fontWeight: 'bold', color: '#1D3557' }}>지난달 명적 확정 (마감 작업)</span>
             <button
-              onClick={() => handleLoadYearlyReport()}
+              onClick={handleFinalizeLastMonth}
               style={{
-                padding: '6px 12px',
+                padding: '8px 16px',
                 borderRadius: 8,
-                border: '1px solid #457B9D',
-                background: '#fff',
-                color: '#457B9D',
-                fontSize: 12,
-                cursor: 'pointer',
-              }}
-            >
-              🔄 데이터 갱신
-            </button>
-            <button
-              onClick={() => setShowYearlyReport(!showYearlyReport)}
-              style={{
-                padding: '6px 12px',
-                borderRadius: 8,
-                border: '1px solid #1D3557',
-                background: showYearlyReport ? '#f1f1f1' : '#fff',
-                color: '#1D3557',
-                fontSize: 12,
+                border: 'none',
+                background: '#1D3557',
+                color: '#fff',
                 fontWeight: 'bold',
                 cursor: 'pointer',
               }}
             >
-              {showYearlyReport ? '🔼 닫기' : '🔽 열기'}
+              지난달 명예의 전당 수동확정
             </button>
           </div>
-        </div>
-
-        {showYearlyReport && (
-          <>
-            <div style={{ display: 'flex', gap: 6, marginBottom: 16, flexWrap: 'wrap' }}>
-              <button onClick={() => setYearlyFilter('all')} style={filterBtnStyle(yearlyFilter === 'all')}>전체 보기</button>
-              <button onClick={() => setYearlyFilter('full')} style={filterBtnStyle(yearlyFilter === 'full')}>📖 1독 이상 달성자</button>
-              {CREW_KEYS.map(ck => (
-                <button
-                  key={ck}
-                  onClick={() => setYearlyFilter(ck)}
-                  style={filterBtnStyle(yearlyFilter === ck)}
-                >
-                  {getCrewLabel(ck)} 완주자
-                </button>
-              ))}
-            </div>
-
-            {yearlyLoading ? <p>분석 중...</p> : (
-              <div style={{ overflowX: 'auto' }}>
-                <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
-                  <thead>
-                    <tr style={{ background: '#f8f9fa', borderBottom: '2px solid #dee2e6' }}>
-                      <th style={{ padding: 10, textAlign: 'left' }}>이름</th>
-                      <th style={{ padding: 10, textAlign: 'center' }}>총 완주 반</th>
-                      <th style={{ padding: 10, textAlign: 'center' }}>성경 1독</th>
-                      <th style={{ padding: 10, textAlign: 'left', fontSize: 11, color: '#666' }}>상세 완주 내역</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {filteredYearlyData.map((u) => (
-                      <tr key={u.name} style={{ borderBottom: '1px solid #eee' }}>
-                        <td style={{ padding: 10, fontWeight: 'bold' }}>{u.name}</td>
-                        <td style={{ padding: 10, textAlign: 'center' }}>
-                          {Object.values(u.crews).reduce((a, b) => a + b, 0)}개 반
-                        </td>
-                        <td style={{ padding: 10, textAlign: 'center' }}>
-                          <span style={{
-                            padding: '4px 8px',
-                            borderRadius: 20,
-                            background: u.totalBible > 0 ? '#E9C46A' : '#f0f0f0',
-                            color: u.totalBible > 0 ? '#000' : '#888',
-                            fontWeight: 'bold',
-                            fontSize: 12
-                          }}>
-                            🔥 {u.totalBible}독
-                          </span>
-                        </td>
-                        <td style={{ padding: 10, fontSize: 11 }}>
-                          {Object.entries(u.crews).map(([c, count]) => (
-                            <span key={c} style={{ marginRight: 8, display: 'inline-block' }}>
-                              {c}({count})
-                            </span>
-                          ))}
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            )}
-          </>
-        )}
-      </div>
-
-
-
-      {/* 👑 [10] 사용자별 체크 기록 강제 관리 */}
-      <div
-        style={{
-          marginBottom: 20,
-          padding: 16,
-          borderRadius: 12,
-          background: '#FFFFFF',
-          boxShadow: '0 4px 12px rgba(0,0,0,0.04)',
-          borderLeft: '5px solid #1D3557'
-        }}
-      >
-        <h3 style={{ marginTop: 0, marginBottom: 10, color: '#1D3557' }}>[10] 사용자별 체크 기록 강제 관리</h3>
-        <p style={{ fontSize: 12, marginBottom: 16, color: '#555' }}>
-          관리자가 특정 성도의 과거 또는 현재 체크 사항을 강제로 수정할 수 있습니다.<br />
-          <strong>성함의 일부를 입력하여 검색 후 선택</strong>해 주세요.
-        </p>
-
-        {/* 스마트 검색 시스템 */}
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 10, marginBottom: 20 }}>
-          {/* 이름 검색창 */}
-          <div style={{ position: 'relative', width: '100%', maxWidth: 350 }}>
-            <input
-              type="text"
-              placeholder="🔍 성도 이름 검색 (예: 홍길동)"
-              value={adminCalSearchTerm}
-              onChange={e => setAdminCalSearchTerm(e.target.value)}
-              style={{
-                width: '100%',
-                padding: '12px 15px',
-                borderRadius: 8,
-                border: '1px solid #1D3557',
-                fontSize: 15,
-                background: '#fff',
-                boxShadow: 'inset 0 2px 4px rgba(0,0,0,0.05)'
-              }}
-            />
-          </div>
-
-          {/* 검색 결과 목록 */}
-          <select
-            value={selectedUser ? `${selectedUser.uid}|${adminCalCrew}` : ''}
-            onChange={e => {
-              const val = e.target.value;
-              if (!val) return;
-              const [uid, ckey] = val.split('|');
-              handleSelectUser(uid, ckey);
-            }}
+          <div
             style={{
-              width: '100%',
-              maxWidth: 350,
-              padding: '10px',
-              borderRadius: 8,
-              border: '1px solid #1D3557',
-              fontSize: 14,
-              fontWeight: 'bold',
-              background: adminCalSearchTerm ? '#FFF9DB' : '#fff'
+              marginTop: 24,
+              padding: 16,
+              borderRadius: 12,
+              background: '#FFFFFF',
+              boxShadow: '0 4px 10px rgba(0,0,0,0.06)',
             }}
           >
-            <option value="">{adminCalSearchTerm ? `-- '${adminCalSearchTerm}' 검색 결과 --` : '-- 검색어로 성도를 찾아주세요 --'}</option>
-            {(() => {
-              const search = (adminCalSearchTerm || '').trim().toLowerCase();
-              if (!search) return null;
-
-              const matchingItems = [];
-              Object.entries(users || {}).forEach(([uid, u]) => {
-                if ((u.name || '').toLowerCase().includes(search)) {
-                  // 해당 사용자가 속한 모든 반 찾기 (승인 명단 기준)
-                  const userCrews = CREW_KEYS.filter(ck => (approvalLists[ck] || []).includes(uid));
-
-                  // 승인 명단엔 없지만 프로필상 소속이 있는 경우 추가
-                  if (u.crew && !userCrews.includes(u.crew)) {
-                    userCrews.push(u.crew);
-                  }
-
-                  if (userCrews.length === 0) {
-                    matchingItems.push({ uid, name: u.name, crew: '미배정' });
-                  } else {
-                    userCrews.forEach(ck => {
-                      matchingItems.push({ uid, name: u.name, crew: ck });
-                    });
-                  }
-                }
-              });
-
-              return matchingItems
-                .sort((a, b) => {
-                  if (a.name !== b.name) return a.name.localeCompare(b.name);
-                  return getCrewLabel(a.crew).localeCompare(getCrewLabel(b.crew));
-                })
-                .map((item, idx) => (
-                  <option key={`${item.uid}_${item.crew}_${idx}`} value={`${item.uid}|${item.crew}`}>
-                    {item.name} ({getCrewLabel(item.crew)})
-                  </option>
-                ));
-            })()}
-          </select>
-          {adminCalSearchTerm && Object.entries(users || {}).filter(([_, u]) => (u.name || '').toLowerCase().includes(adminCalSearchTerm.toLowerCase())).length === 0 && (
-            <div style={{ fontSize: 12, color: '#E63946', marginLeft: 4 }}>
-              검색 결과가 없습니다.
-            </div>
-          )}
-        </div>
-
-        {!selectedUser ? (
-          <div style={{ padding: '20px', textAlign: 'center', background: '#f8f9fa', borderRadius: 8, color: '#999' }}>
-            성도를 선택하면 달력이 표시됩니다.
-          </div>
-        ) : (
-          <div>
-            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10, marginBottom: 16, alignItems: 'center' }}>
-              <span style={{ fontWeight: 'bold', fontSize: 15, color: '#1D3557' }}>👤 선택됨: {selectedUser.name} 성도</span>
-              <div style={{ display: 'flex', gap: 6 }}>
-                <select value={adminCalYear} onChange={e => setAdminCalYear(Number(e.target.value))} style={{ padding: 6, borderRadius: 8, border: '1px solid #ccc' }}>
-                  {[2025, 2026, 2027].map(y => <option key={y} value={y}>{y}년</option>)}
-                </select>
-                <select value={adminCalMonth} onChange={e => setAdminCalMonth(Number(e.target.value))} style={{ padding: 6, borderRadius: 8, border: '1px solid #ccc' }}>
-                  {Array.from({ length: 12 }, (_, i) => i + 1).map(m => <option key={m} value={m}>{m}월</option>)}
-                </select>
-                <select value={adminCalCrew} onChange={e => setAdminCalCrew(e.target.value)} style={{ padding: 6, borderRadius: 8, border: '1px solid #ccc' }}>
-                  <option value="">반 선택</option>
-                  {CREW_KEYS.map(ck => <option key={ck} value={ck}>{getCrewLabel(ck)}</option>)}
-                </select>
-              </div>
-            </div>
-
-            <div style={{
-              display: 'grid',
-              gridTemplateColumns: 'repeat(auto-fill, minmax(60px, 1fr))',
-              gap: 8,
-              padding: 10,
-              background: '#f1f3f5',
-              borderRadius: 12
-            }}>
-              {(() => {
-                const dates = getMonthDates(adminCalYear, adminCalMonth);
-                return dates.map(d => {
-                  const isChecked = adminCalChecks[d];
-                  const day = d.split('-')[2];
-                  return (
-                    <button
-                      key={d}
-                      onClick={() => handleToggleAdminCheck(d, isChecked)}
-                      style={{
-                        padding: '12px 0',
-                        borderRadius: 8,
-                        border: isChecked ? 'none' : '1px solid #dee2e6',
-                        background: isChecked ? '#1D3557' : '#fff',
-                        color: isChecked ? '#fff' : '#495057',
-                        fontWeight: 'bold',
-                        fontSize: 13,
-                        cursor: 'pointer',
-                        transition: 'all 0.2s'
-                      }}
-                    >
-                      {day}일
-                      <div style={{ fontSize: 10, marginTop: 2, opacity: 0.8 }}>
-                        {isChecked ? 'V' : '-'}
-                      </div>
-                    </button>
-                  );
-                });
-              })()}
-            </div>
-            <p style={{ fontSize: 11, color: '#666', marginTop: 10 }}>
-              * 날짜를 클릭하면 해당 반의 체크 기록이 실시간으로 수정됩니다. (파란색=체크됨)
-            </p>
-          </div>
-        )}
-      </div>
-
-      {/* 👑 관리자 권한 관리 */}
-      <div
-        style={{
-          marginBottom: 40,
-          padding: 16,
-          borderRadius: 12,
-          background: '#FFFFFF',
-          boxShadow: '0 4px 12px rgba(0,0,0,0.04)',
-          borderLeft: '5px solid #333'
-        }}
-      >
-        <h3 style={{ marginTop: 0, marginBottom: 10, color: '#333' }}>[11] 관리자 권한 관리</h3>
-        <p style={{ fontSize: 12, marginBottom: 16, color: '#555' }}>
-          지정된 사용자는 비밀번호 입력 없이 관리자 페이지에 즉시 접속할 수 있습니다. (소수 정예 운영 권장)
-        </p>
-
-        {/* 현재 관리자 목록 */}
-        <h4 style={{ fontSize: 14, marginBottom: 8 }}>현재 관리자 목록</h4>
-        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginBottom: 20 }}>
-          {Object.values(users || {}).filter(u => u.isAdmin).length === 0 && (
-            <div style={{ fontSize: 13, color: '#999' }}>지정된 관리자가 없습니다.</div>
-          )}
-          {Object.entries(users || {}).filter(([_, u]) => u.isAdmin).map(([uid, u]) => (
-            <div key={uid} style={{
-              display: 'flex', alignItems: 'center', gap: 6,
-              padding: '6px 10px', background: '#f5f5f5', borderRadius: 20, border: '1px solid #ddd'
-            }}>
-              <span style={{ fontWeight: 'bold', fontSize: 13 }}>{u.name || uid}</span>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
+              <h3 style={{ margin: 0 }}>[6] 이번 달 크루 달리기 현황</h3>
               <button
-                onClick={() => handleToggleAdmin(uid, u.name, true)} // 해제
+                onClick={() => setShowCrewStatus(!showCrewStatus)}
                 style={{
-                  border: 'none', background: 'none', cursor: 'pointer', fontSize: 12, color: '#E63946', padding: 0
+                  padding: '6px 12px',
+                  borderRadius: 8,
+                  border: '1px solid #1D3557',
+                  background: showCrewStatus ? '#f1f1f1' : '#fff',
+                  color: '#1D3557',
+                  fontSize: 12,
+                  fontWeight: 'bold',
+                  cursor: 'pointer',
                 }}
               >
-                ✕
+                {showCrewStatus ? '🔼 닫기' : '🔽 열기'}
               </button>
             </div>
-          ))}
-        </div>
+            {showCrewStatus && (
+              <>
+                <p style={{ fontSize: 12, marginBottom: 10 }}>
+                  오늘 날짜까지 읽어야 할 분량 기준으로 진행률과 성공 여부를 계산합니다.
+                </p>
+                {CREW_KEYS.map((crew) => (
+                  <div key={crew} style={{ marginBottom: 16 }}>
+                    <h4 style={{ marginBottom: 6 }}>{getCrewLabel(crew)}</h4>
+                    {(!crewStatus[crew] || crewStatus[crew].length === 0) && (
+                      <p style={{ fontSize: 12, color: '#666' }}>아직 데이터가 없습니다.</p>
+                    )}
+                    {crewStatus[crew] && crewStatus[crew].length > 0 && (
+                      <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
+                        <thead>
+                          <tr>
+                            <th style={{ borderBottom: '1px solid #ccc', textAlign: 'left', padding: 4 }}>이름</th>
+                            <th style={{ borderBottom: '1px solid #ccc', textAlign: 'right', padding: 4 }}>읽은 장</th>
+                            <th style={{ borderBottom: '1px solid #ccc', textAlign: 'right', padding: 4 }}>진행률</th>
+                            <th style={{ borderBottom: '1px solid #ccc', textAlign: 'center', padding: 4 }}>상태</th>
+                            <th style={{ borderBottom: '1px solid #ccc', textAlign: 'center', padding: 4 }}>비번 초기화</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {crewStatus[crew].map((u) => (
+                            <tr key={u.uid}>
+                              <td style={{ borderBottom: '1px solid #eee', padding: 4 }}>{u.name}</td>
+                              <td style={{ borderBottom: '1px solid #eee', padding: 4, textAlign: 'right' }}>{u.chapters}</td>
+                              <td style={{ borderBottom: '1px solid #eee', padding: 4, textAlign: 'right' }}>
+                                {u.progress}%
+                              </td>
+                              <td style={{ borderBottom: '1px solid #eee', padding: 4, textAlign: 'center' }}>
+                                {(() => {
+                                  const label = u.stateLabel || '🟢 오늘준비';
+                                  const key = u.stateKey || '';
+                                  const isSuccess = key === 'success' || label.includes('성공');
+                                  const isReady = key === 'ready' || label.includes('오늘준비');
+                                  const isRunning = key === 'running' || label.includes('러닝');
+                                  const isFail = key === 'fail' || label.includes('힘을내!') || key === 'shortage';
 
-        {/* 새 관리자 추가 */}
-        <h4 style={{ fontSize: 14, marginBottom: 8 }}>관리자 추가</h4>
-        <div style={{ display: 'flex', gap: 8, maxWidth: 300 }}>
-          <input
-            placeholder="이름 입력"
-            id="newAdminNameInput"
-            style={{ flex: 1, padding: 8, borderRadius: 6, border: '1px solid #ccc' }}
-          />
-          <button
-            onClick={() => {
-              const nameInput = document.getElementById('newAdminNameInput');
-              const name = (nameInput.value || '').trim();
-              if (!name) return;
+                                  if (isReady) {
+                                    return (
+                                      <span style={{ color: '#166534', fontWeight: 600 }}>
+                                        {label}
+                                      </span>
+                                    );
+                                  }
 
-              // 이름으로 UID 찾기
-              const foundEntry = Object.entries(users || {}).find(([_, u]) => u.name === name);
+                                  const style = {
+                                    display: 'inline-block',
+                                    borderRadius: 8,
+                                    padding: '4px 16px',
+                                    fontWeight: 600,
+                                    backgroundColor: isSuccess
+                                      ? '#DCFCE7'
+                                      : isRunning
+                                        ? '#DBEAFE'
+                                        : '#E5E7EB',
+                                    color: isSuccess
+                                      ? '#166534'
+                                      : isRunning
+                                        ? '#1D4ED8'
+                                        : '#111827',
+                                  };
 
-              if (!foundEntry) {
-                alert(`'${name}' 사용자를 찾을 수 없습니다.`);
-                return;
-              }
-              const [uid, u] = foundEntry;
+                                  return <span style={style}>{label}</span>;
+                                })()}
+                              </td>
+                              <td style={{ borderBottom: '1px solid #eee', padding: 4, textAlign: 'center' }}>
+                                <button
+                                  type='button'
+                                  onClick={() => handleConfirmResetPassword(u.uid, u.name)}
+                                  style={{
+                                    padding: '4px 8px',
+                                    borderRadius: 8,
+                                    border: 'none',
+                                    background: '#8D99AE',
+                                    color: '#fff',
+                                    fontSize: 11,
+                                    cursor: 'pointer',
+                                  }}
+                                >
+                                  비번 0000
+                                </button>
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    )}
+                  </div>
+                ))}
+              </>
+            )}
 
-              if (u.isAdmin) {
-                alert('이미 관리자입니다.');
-                return;
-              }
+            {/* 미배정 명단 */}
+            <div style={{ marginTop: 16 }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
+                <h4 style={{ margin: 0 }}>미배정 명단</h4>
+                <button
+                  onClick={() => setShowUnassignedUsers(!showUnassignedUsers)}
+                  style={{
+                    padding: '4px 10px',
+                    borderRadius: 8,
+                    border: '1px solid #1D3557',
+                    background: showUnassignedUsers ? '#f1f1f1' : '#fff',
+                    color: '#1D3557',
+                    fontSize: 11,
+                    fontWeight: 'bold',
+                    cursor: 'pointer',
+                  }}
+                >
+                  {showUnassignedUsers ? '🔼 닫기' : '🔽 열기'}
+                </button>
+              </div>
+              {showUnassignedUsers && (
+                <>
+                  {(!unassignedUsers || unassignedUsers.length === 0) && (
+                    <p style={{ fontSize: 12, color: '#666' }}>미배정 사용자가 없습니다.</p>
+                  )}
+                  {unassignedUsers && unassignedUsers.length > 0 && (
+                    <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
+                      <thead>
+                        <tr>
+                          <th style={{ borderBottom: '1px solid #ccc', textAlign: 'left', padding: 4 }}>이름</th>
+                          <th style={{ borderBottom: '1px solid #ccc', textAlign: 'center', padding: 4 }}>비번 초기화</th>
+                          <th style={{ borderBottom: '1px solid #ccc', textAlign: 'center', padding: 4 }}>삭제</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {unassignedUsers.map((u) => (
+                          <tr key={u.uid}>
+                            <td style={{ borderBottom: '1px solid #eee', padding: 4 }}>
+                              {u.name || u.uid}
+                            </td>
+                            <td style={{ borderBottom: '1px solid #eee', padding: 4, textAlign: 'center' }}>
+                              <button
+                                type='button'
+                                onClick={() => handleConfirmResetPassword(u.uid, u.name)}
+                                style={{
+                                  padding: '4px 8px',
+                                  borderRadius: 8,
+                                  border: 'none',
+                                  background: '#8D99AE',
+                                  color: '#fff',
+                                  fontSize: 11,
+                                  cursor: 'pointer',
+                                }}
+                              >
+                                비번 0000
+                              </button>
+                            </td>
+                            <td style={{ borderBottom: '1px solid #eee', padding: 4, textAlign: 'center' }}>
+                              <button
+                                type='button'
+                                onClick={() => handleConfirmDeactivate(u.uid, u.name)}
+                                style={{
+                                  padding: '4px 8px',
+                                  borderRadius: 8,
+                                  border: 'none',
+                                  background: '#E63946',
+                                  color: '#fff',
+                                  fontSize: 11,
+                                  cursor: 'pointer',
+                                }}
+                              >
+                                삭제
+                              </button>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  )}
+                </>
+              )}
+            </div>
+          </div>
 
-              handleToggleAdmin(uid, u.name, false); // 추가
-              nameInput.value = '';
-            }}
+
+          {/* 명예의 전당 수동 수정 */}
+          <div
             style={{
-              padding: '8px 12px',
-              borderRadius: 6,
-              border: 'none',
-              background: '#333',
-              color: '#fff',
-              fontWeight: 'bold',
-              cursor: 'pointer',
+              marginTop: 24,
+              padding: 16,
+              borderRadius: 12,
+              background: '#FFFFFF',
+              boxShadow: '0 4px 10px rgba(0,0,0,0.06)',
             }}
           >
-            추가
-          </button>
-        </div>
-      </div>
+            <h3 style={{ marginTop: 0, marginBottom: 10 }}>[7] 명예의 전당 수동 수정</h3>
+            <p style={{ fontSize: 12, marginBottom: 10, color: '#555' }}>
+              사용자가 메달에 대해 이의를 제기했을 때, 연도·월·이름 기준으로 메달을 조정할 수 있습니다.
+              수정 시 해당 사용자의 개인 메달 기록도 함께 반영됩니다.
+            </p>
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginBottom: 8 }}>
+              <input
+                type="number"
+                value={manualHoFYear}
+                onChange={(e) => setManualHoFYear(Number(e.target.value) || 0)}
+                placeholder="연도(예: 2025)"
+                style={{ width: 110, padding: 6, borderRadius: 8, border: '1px solid #ccc' }}
+              />
+              <input
+                type="number"
+                value={manualHoFMonth}
+                onChange={(e) => {
+                  const raw = Number(e.target.value) || 0;
+                  const clamped = Math.min(12, Math.max(1, raw));
+                  setManualHoFMonth(clamped);
+                }}
+                placeholder="월(1~12)"
+                style={{ width: 80, padding: 6, borderRadius: 8, border: '1px solid #ccc' }}
+              />
+              <input
+                type="text"
+                value={manualHoFName}
+                onChange={(e) => setManualHoFName(e.target.value)}
+                placeholder="사용자 이름"
+                style={{ flex: 1, minWidth: 120, padding: 6, borderRadius: 8, border: '1px solid #ccc' }}
+              />
+              <select
+                value={manualHoFCrew}
+                onChange={(e) => setManualHoFCrew(e.target.value)}
+                style={{ width: 140, padding: 6, borderRadius: 8, border: '1px solid #ccc' }}
+              >
+                <option value="">반 선택</option>
+                {CREW_KEYS.map(ck => (
+                  <option key={ck} value={ck}>{getCrewLabel(ck)}</option>
+                ))}
+              </select>
+              <select
+                value={manualHoFMedal}
+                onChange={(e) => setManualHoFMedal(e.target.value)}
+                style={{ width: 120, padding: 6, borderRadius: 8, border: '1px solid #ccc' }}
+              >
+                <option value="gold">🥇 금</option>
+                <option value="silver">🥈 은</option>
+                <option value="bronze">🥉 동</option>
+                <option value="none">메달 삭제</option>
+              </select>
+            </div>
+            <button
+              onClick={handleManualHallOfFameAdjust}
+              disabled={manualHoFLoading}
+              style={{
+                padding: '8px 16px',
+                borderRadius: 8,
+                border: 'none',
+                background: manualHoFLoading ? '#A8A8A8' : '#1D3557',
+                color: '#fff',
+                fontWeight: 'bold',
+                cursor: 'pointer',
+              }}
+            >
+              {manualHoFLoading ? '수정 중...' : '명예의 전당 수동 수정 저장'}
+            </button>
+          </div>
 
-    </div >
+          {/* [10] 사용자별 체크 기록 강제 관리 추가 (그룹 3 내부) */}
+          <div
+            style={{
+              marginBottom: 20,
+              padding: 16,
+              borderRadius: 12,
+              background: '#FFFFFF',
+              boxShadow: '0 4px 12px rgba(0,0,0,0.04)',
+              borderLeft: '5px solid #1D3557',
+              marginTop: 24
+            }}
+          >
+            <h3 style={{ marginTop: 0, marginBottom: 10, color: '#1D3557' }}>[10] 사용자별 체크 기록 강제 관리</h3>
+            <p style={{ fontSize: 12, marginBottom: 16, color: '#555' }}>
+              관리자가 특정 성도의 과거 또는 현재 체크 사항을 강제로 수정할 수 있습니다.<br />
+              <strong>성함의 일부를 입력하여 검색 후 선택</strong>해 주세요.
+            </p>
+
+            {/* 스마트 검색 시스템 */}
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 10, marginBottom: 20 }}>
+              {/* 이름 검색창 */}
+              <div style={{ position: 'relative', width: '100%', maxWidth: 350 }}>
+                <input
+                  type="text"
+                  placeholder="🔍 성도 이름 검색 (예: 홍길동)"
+                  value={adminCalSearchTerm}
+                  onChange={e => setAdminCalSearchTerm(e.target.value)}
+                  style={{
+                    width: '100%',
+                    padding: '12px 15px',
+                    borderRadius: 8,
+                    border: '1px solid #1D3557',
+                    fontSize: 15,
+                    background: '#fff',
+                    boxShadow: 'inset 0 2px 4px rgba(0,0,0,0.05)'
+                  }}
+                />
+              </div>
+
+              {/* 검색 결과 목록 */}
+              <select
+                value={selectedUser ? `${selectedUser.uid}|${adminCalCrew}` : ''}
+                onChange={e => {
+                  const val = e.target.value;
+                  if (!val) return;
+                  const [uid, ckey] = val.split('|');
+                  handleSelectUser(uid, ckey);
+                }}
+                style={{
+                  width: '100%',
+                  maxWidth: 350,
+                  padding: '10px',
+                  borderRadius: 8,
+                  border: '1px solid #1D3557',
+                  fontSize: 14,
+                  fontWeight: 'bold',
+                  background: adminCalSearchTerm ? '#FFF9DB' : '#fff'
+                }}
+              >
+                <option value="">{adminCalSearchTerm ? `-- '${adminCalSearchTerm}' 검색 결과 --` : '-- 검색어로 성도를 찾아주세요 --'}</option>
+                {(() => {
+                  const search = (adminCalSearchTerm || '').trim().toLowerCase();
+                  if (!search) return null;
+
+                  const matchingItems = [];
+                  Object.entries(users || {}).forEach(([uid, u]) => {
+                    if ((u.name || '').toLowerCase().includes(search)) {
+                      const userCrews = CREW_KEYS.filter(ck => (approvalLists[ck] || []).includes(uid));
+                      if (u.crew && !userCrews.includes(u.crew)) userCrews.push(u.crew);
+
+                      if (userCrews.length === 0) matchingItems.push({ uid, name: u.name, crew: '미배정' });
+                      else userCrews.forEach(ck => matchingItems.push({ uid, name: u.name, crew: ck }));
+                    }
+                  });
+
+                  return matchingItems
+                    .sort((a, b) => {
+                      if (a.name !== b.name) return a.name.localeCompare(b.name);
+                      return getCrewLabel(a.crew).localeCompare(getCrewLabel(b.crew));
+                    })
+                    .map((item, idx) => (
+                      <option key={`${item.uid}_${item.crew}_${idx}`} value={`${item.uid}|${item.crew}`}>
+                        {item.name} ({getCrewLabel(item.crew)})
+                      </option>
+                    ));
+                })()}
+              </select>
+            </div>
+
+            {!selectedUser ? (
+              <div style={{ padding: '20px', textAlign: 'center', background: '#f8f9fa', borderRadius: 8, color: '#999' }}>
+                성도를 선택하면 달력이 표시됩니다.
+              </div>
+            ) : (
+              <div>
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10, marginBottom: 16, alignItems: 'center' }}>
+                  <span style={{ fontWeight: 'bold', fontSize: 15, color: '#1D3557' }}>👤 선택됨: {selectedUser.name} 성도</span>
+                  <div style={{ display: 'flex', gap: 6 }}>
+                    <select value={adminCalYear} onChange={e => setAdminCalYear(Number(e.target.value))} style={{ padding: 6, borderRadius: 8, border: '1px solid #ccc' }}>
+                      {[2025, 2026, 2027].map(y => <option key={y} value={y}>{y}년</option>)}
+                    </select>
+                    <select value={adminCalMonth} onChange={e => setAdminCalMonth(Number(e.target.value))} style={{ padding: 6, borderRadius: 8, border: '1px solid #ccc' }}>
+                      {Array.from({ length: 12 }, (_, i) => i + 1).map(m => <option key={m} value={m}>{m}월</option>)}
+                    </select>
+                    <select value={adminCalCrew} onChange={e => setAdminCalCrew(e.target.value)} style={{ padding: 6, borderRadius: 8, border: '1px solid #ccc' }}>
+                      <option value="">반 선택</option>
+                      {CREW_KEYS.map(ck => <option key={ck} value={ck}>{getCrewLabel(ck)}</option>)}
+                    </select>
+                  </div>
+                </div>
+                <div style={{
+                  display: 'grid',
+                  gridTemplateColumns: 'repeat(auto-fill, minmax(60px, 1fr))',
+                  gap: 8,
+                  padding: 10,
+                  background: '#f1f3f5',
+                  borderRadius: 12
+                }}>
+                  {getMonthDates(adminCalYear, adminCalMonth).map(d => {
+                    const isChecked = adminCalChecks[d];
+                    const day = d.split('-')[2];
+                    return (
+                      <button
+                        key={d}
+                        onClick={() => handleToggleAdminCheck(d, isChecked)}
+                        style={{
+                          padding: '12px 0',
+                          borderRadius: 8,
+                          border: isChecked ? 'none' : '1px solid #dee2e6',
+                          background: isChecked ? '#1D3557' : '#fff',
+                          color: isChecked ? '#fff' : '#495057',
+                          fontWeight: 'bold',
+                          fontSize: 13,
+                          cursor: 'pointer',
+                          transition: 'all 0.2s'
+                        }}
+                      >
+                        {day}일
+                        <div style={{ fontSize: 10, marginTop: 2, opacity: 0.8 }}>{isChecked ? 'V' : '-'}</div>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {activeTab === 'group4' && (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
+          {/* [8] 월별 결과 보고서 */}
+          <div
+            style={{
+              padding: 16,
+              borderRadius: 12,
+              background: '#FFFFFF',
+              boxShadow: '0 4px 12px rgba(0,0,0,0.04)',
+            }}
+          >
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
+              <h3 style={{ margin: 0, color: '#1D3557' }}>[8] 월별 결과 보고서 (과거 기록 조회)</h3>
+              <button
+                onClick={() => setShowMonthlyArchive(!showMonthlyArchive)}
+                style={{
+                  padding: '8px 14px',
+                  borderRadius: 8,
+                  border: '1px solid #1D3557',
+                  background: showMonthlyArchive ? '#f1f1f1' : '#fff',
+                  color: '#1D3557',
+                  fontSize: 13,
+                  fontWeight: 'bold',
+                  cursor: 'pointer',
+                }}
+              >
+                {showMonthlyArchive ? '🔼 보관함 닫기' : '🔽 보관함 열기'}
+              </button>
+            </div>
+            {!showMonthlyArchive && (
+              <p style={{ fontSize: 12, color: '#666', margin: 0 }}>
+                과거의 월별 달리기 결과 및 명단 기록을 선택하여 확인할 수 있습니다.
+              </p>
+            )}
+
+            {showMonthlyArchive && (
+              <>
+                <div style={{ marginTop: 16, marginBottom: 16 }}>
+                  <label style={{ fontSize: 13, marginRight: 8 }}>보고서 선택:</label>
+                  <select
+                    value={selectedReportYM}
+                    onChange={(e) => handleLoadReport(e.target.value)}
+                    style={{ padding: '6px 10px', borderRadius: 8, border: '1px solid #ccc' }}
+                  >
+                    <option value="">-- 월 선택 --</option>
+                    {reportMonths.map(m => <option key={m} value={m}>{m}</option>)}
+                  </select>
+                </div>
+
+                {reportLoading && <p>데이터를 불러오는 중...</p>}
+
+                {reportData && (
+                  <div style={{ overflowX: 'auto' }}>
+                    <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
+                      <thead>
+                        <tr style={{ background: '#f8f9fa', borderBottom: '2px solid #dee2e6' }}>
+                          <th style={{ padding: 10, textAlign: 'left' }}>반</th>
+                          <th style={{ padding: 10, textAlign: 'left' }}>이름</th>
+                          <th style={{ padding: 10, textAlign: 'center' }}>읽은 장수</th>
+                          <th style={{ padding: 10, textAlign: 'center' }}>진행률</th>
+                          <th style={{ padding: 10, textAlign: 'center' }}>상태</th>
+                          <th style={{ padding: 10, textAlign: 'center' }}>누적 메달</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {Object.values(reportData)
+                          .sort((a, b) => a.crew.localeCompare(b.crew) || a.name.localeCompare(b.name))
+                          .map((row) => (
+                            <tr key={row.uid} style={{ borderBottom: '1px solid #eee' }}>
+                              <td style={{ padding: 10 }}>{row.crew}</td>
+                              <td style={{ padding: 10, fontWeight: 'bold' }}>{row.name}</td>
+                              <td style={{ padding: 10, textAlign: 'center' }}>{row.chapters}장</td>
+                              <td style={{ padding: 10, textAlign: 'center' }}>{row.progress}%</td>
+                              <td style={{ padding: 10, textAlign: 'center' }}>
+                                <span style={{
+                                  padding: '2px 6px',
+                                  borderRadius: 4,
+                                  fontSize: 11,
+                                  color: '#fff',
+                                  background: row.stateLabel === '성공' ? '#2E7D32' : row.stateLabel === '도전중' ? '#1E88E5' : '#D32F2F'
+                                }}>
+                                  {row.stateLabel}
+                                </span>
+                              </td>
+                              <td style={{ padding: 10, textAlign: 'center' }}>{row.totalMedals}개</td>
+                            </tr>
+                          ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </>
+            )}
+          </div>
+
+          {/* 🏆 2026 연간 누적 보고서 (1독 달성 현황) */}
+          <div
+            style={{
+              marginBottom: 20,
+              padding: 16,
+              borderRadius: 12,
+              background: '#ffffff',
+              boxShadow: '0 4px 12px rgba(0,0,0,0.04)',
+            }}
+          >
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14 }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                <h3 style={{ margin: 0, color: '#1D3557' }}>[9] 올해 누적 보고서 (성경 1독 현황)</h3>
+                <select
+                  value={selectedYearForReport}
+                  onChange={(e) => {
+                    const yr = Number(e.target.value);
+                    setSelectedYearForReport(yr);
+                    handleLoadYearlyReport(yr);
+                  }}
+                  style={{ padding: '4px 8px', borderRadius: 8, border: '1px solid #ccc', fontSize: 13 }}
+                >
+                  {[2024, 2025, 2026, 2027].map(y => <option key={y} value={y}>{y}년</option>)}
+                </select>
+              </div>
+              <div style={{ display: 'flex', gap: 8 }}>
+                <button
+                  onClick={() => handleLoadYearlyReport()}
+                  style={{
+                    padding: '6px 12px',
+                    borderRadius: 8,
+                    border: '1px solid #457B9D',
+                    background: '#fff',
+                    color: '#457B9D',
+                    fontSize: 12,
+                    cursor: 'pointer',
+                  }}
+                >
+                  🔄 데이터 갱신
+                </button>
+                <button
+                  onClick={() => setShowYearlyReport(!showYearlyReport)}
+                  style={{
+                    padding: '6px 12px',
+                    borderRadius: 8,
+                    border: '1px solid #1D3557',
+                    background: showYearlyReport ? '#f1f1f1' : '#fff',
+                    color: '#1D3557',
+                    fontSize: 12,
+                    fontWeight: 'bold',
+                    cursor: 'pointer',
+                  }}
+                >
+                  {showYearlyReport ? '🔼 닫기' : '🔽 열기'}
+                </button>
+              </div>
+            </div>
+
+            {
+              showYearlyReport && (
+                <>
+                  <div style={{ display: 'flex', gap: 6, marginBottom: 16, flexWrap: 'wrap' }}>
+                    <button onClick={() => setYearlyFilter('all')} style={filterBtnStyle(yearlyFilter === 'all')}>전체 보기</button>
+                    <button onClick={() => setYearlyFilter('full')} style={filterBtnStyle(yearlyFilter === 'full')}>📖 1독 이상 달성자</button>
+                    {CREW_KEYS.map(ck => (
+                      <button
+                        key={ck}
+                        onClick={() => setYearlyFilter(ck)}
+                        style={filterBtnStyle(yearlyFilter === ck)}
+                      >
+                        {getCrewLabel(ck)} 완주자
+                      </button>
+                    ))}
+                  </div>
+
+                  {yearlyLoading ? <p>분석 중...</p> : (
+                    <div style={{ overflowX: 'auto' }}>
+                      <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
+                        <thead>
+                          <tr style={{ background: '#f8f9fa', borderBottom: '2px solid #dee2e6' }}>
+                            <th style={{ padding: 10, textAlign: 'left' }}>이름</th>
+                            <th style={{ padding: 10, textAlign: 'center' }}>총 완주 반</th>
+                            <th style={{ padding: 10, textAlign: 'center' }}>성경 1독</th>
+                            <th style={{ padding: 10, textAlign: 'left', fontSize: 11, color: '#666' }}>상세 완주 내역</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {filteredYearlyData.map((u) => (
+                            <tr key={u.name} style={{ borderBottom: '1px solid #eee' }}>
+                              <td style={{ padding: 10, fontWeight: 'bold' }}>{u.name}</td>
+                              <td style={{ padding: 10, textAlign: 'center' }}>
+                                {Object.values(u.crews).reduce((a, b) => a + b, 0)}개 반
+                              </td>
+                              <td style={{ padding: 10, textAlign: 'center' }}>
+                                <span style={{
+                                  padding: '4px 8px',
+                                  borderRadius: 20,
+                                  background: u.totalBible > 0 ? '#E9C46A' : '#f0f0f0',
+                                  color: u.totalBible > 0 ? '#000' : '#888',
+                                  fontWeight: 'bold',
+                                  fontSize: 12
+                                }}>
+                                  🔥 {u.totalBible}독
+                                </span>
+                              </td>
+                              <td style={{ padding: 10, fontSize: 11 }}>
+                                {Object.entries(u.crews).map(([c, count]) => (
+                                  <span key={c} style={{ marginRight: 8, display: 'inline-block' }}>
+                                    {c}({count})
+                                  </span>
+                                ))}
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  )}
+                </>
+              )}
+          </div>
+        </div>
+      )}
+    </div>
   );
 }
 
