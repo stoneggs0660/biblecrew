@@ -7,6 +7,7 @@ import { getDailyBiblePortionByCrew, OT_TOTAL, NT_TOTAL, ALL_TOTAL, OT_A_TOTAL, 
 import RunningCoursePath from './RunningCoursePath';
 import { getCrewLabel } from '../utils/crewConfig';
 import { getTodayCrewState } from '../utils/crewStatusUtils';
+import { calculateDokStatus } from '../utils/dokUtils';
 
 export default function CrewPage({ crewName, user }) {
   const displayName = `${getCrewLabel(crewName)} 성경크루`;
@@ -256,6 +257,8 @@ export default function CrewPage({ crewName, user }) {
       userDailyActivity: info.dailyActivity || {},
     });
 
+    const dokStatus = calculateDokStatus(info.earnedMedals || {});
+
     list.push({
       uid,
       name,
@@ -264,6 +267,7 @@ export default function CrewPage({ crewName, user }) {
       stateKey: state.key,
       stateLabel: state.label,
       medals,
+      dokStatus
     });
   }
 
@@ -1137,176 +1141,142 @@ export default function CrewPage({ crewName, user }) {
 
       {/* 이번 달 크루 현황 (반 페이지 하단) */}
       <div style={{ marginTop: 28 }}>
-        <p style={{ fontWeight: 700, marginBottom: 8 }}>🏅 이번 달 크루 현황</p>
-        {(!crewStatus || crewStatus.length === 0) ? (
-          <div
-            style={{
-              padding: 12,
-              borderRadius: 12,
-              background: '#F8FAFF',
-              border: '1px solid #E2E8F0',
-              fontSize: 13,
-              color: '#64748B',
-            }}
-          >
-            아직 현황을 표시할 참여자가 없습니다.
-          </div>
-        ) : (
-          <div style={{ overflowX: 'auto' }}>
-            <table
-              style={{
-                width: '100%',
-                borderCollapse: 'collapse',
-                fontSize: 12,
-                background: '#F8FAFF',
-                borderRadius: 12,
-              }}
-            >
-              <thead>
-                <tr>
-                  <th
-                    style={{
-                      borderBottom: '1px solid #CBD5E1',
-                      padding: 6,
-                    }}
-                  >
-                    이름
-                  </th>
-                  <th
-                    style={{
-                      borderBottom: '1px solid #CBD5E1',
-                      padding: 6,
-                      textAlign: 'right',
-                    }}
-                  >
-                    진행률
-                  </th>
-                  <th
-                    style={{
-                      borderBottom: '1px solid #CBD5E1',
-                      padding: 6,
-                      textAlign: 'right',
-                    }}
-                  >
-                    읽은 장
-                  </th>
-                  <th
-                    style={{
-                      borderBottom: '1px solid #CBD5E1',
-                      padding: 6,
-                      textAlign: 'center',
-                    }}
-                  >
-                    상태
-                  </th>
-                  <th
-                    style={{
-                      borderBottom: '1px solid #CBD5E1',
-                      padding: 6,
-                      textAlign: 'center',
-                    }}
-                  >
-                    메달
-                  </th>
-                </tr>
-              </thead>
-              <tbody>
-                {crewStatus.map((u) => (
-                  <tr key={u.uid}>
-                    <td
-                      style={{
-                        borderBottom: '1px solid #E2E8F0',
-                        padding: 6,
-                      }}
-                    >
-                      {u.name}
-                    </td>
-                    <td
-                      style={{
-                        borderBottom: '1px solid #E2E8F0',
-                        padding: 6,
-                        textAlign: 'right',
-                      }}
-                    >
-                      {u.progress}%
-                    </td>
-                    <td
-                      style={{
-                        borderBottom: '1px solid #E2E8F0',
-                        padding: 6,
-                        textAlign: 'right',
-                      }}
-                    >
-                      {u.chapters}장
-                    </td>
-                    <td
-                      style={{
-                        borderBottom: '1px solid #E2E8F0',
-                        padding: 6,
-                        textAlign: 'center',
-                      }}
-                    >
-                      <span
-                        style={{
-                          display: 'inline-block',
-                          padding: '4px 16px',
-                          borderRadius: 8,
-                          background:
-                            u.stateKey === 'success'
-                              ? '#DCFCE7'
-                              : u.stateKey === 'running'
-                                ? '#DBEAFE'
-                                : u.stateKey === 'fail' || u.stateKey === 'shortage'
-                                  ? '#E5E7EB'
-                                  : 'transparent',
-                          color:
-                            u.stateKey === 'success'
-                              ? '#166534'
-                              : u.stateKey === 'running'
-                                ? '#1D4ED8'
-                                : u.stateKey === 'fail' || u.stateKey === 'shortage'
-                                  ? '#111827'
-                                  : '#166534',
-                          fontWeight: 600,
-                        }}
-                      >
-                        {u.stateLabel || '🟢 오늘준비'}
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 15 }}>
+          <p style={{ fontWeight: 800, fontSize: 18, margin: 0 }}>🏅 이번 달 크루 현황</p>
+        </div>
+
+        {(() => {
+          if (crewStatus.length === 0) {
+            return (
+              <div style={{
+                padding: '40px 20px',
+                textAlign: 'center',
+                background: 'rgba(255,255,255,0.5)',
+                borderRadius: 20,
+                border: '1px dashed #CBD5E1',
+                color: '#64748B',
+                fontSize: 14
+              }}>
+                참여 중인 크루원이 없습니다.
+              </div>
+            );
+          }
+
+          return (
+            <div style={{
+              display: 'grid',
+              gridTemplateColumns: 'repeat(auto-fill, minmax(160px, 1fr))',
+              gap: 10
+            }}>
+              {crewStatus.map((u) => (
+                <div key={u.uid} style={{
+                  background: '#fff',
+                  borderRadius: 16,
+                  padding: '16px',
+                  border: '1px solid #E2E8F0',
+                  display: 'flex',
+                  flexDirection: 'column',
+                  gap: 10,
+                  boxShadow: '0 2px 6px rgba(0,0,0,0.03)',
+                  transition: 'transform 0.2s ease',
+                }}>
+                  {/* 첫째줄: 이름 상태 장수 (%) 모두 한 줄 배치 (크기 최적화) */}
+                  <div style={{
+                    display: 'flex',
+                    justifyContent: 'space-between',
+                    alignItems: 'center',
+                    gap: 2
+                  }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 2, minWidth: 0, flex: 1 }}>
+                      <span style={{
+                        fontSize: 15,
+                        fontWeight: 800,
+                        color: '#1E293B',
+                        whiteSpace: 'nowrap',
+                        overflow: 'hidden',
+                        textOverflow: 'ellipsis'
+                      }}>{u.name}</span>
+                      <span style={{
+                        fontSize: 10,
+                        fontWeight: 700,
+                        color: u.stateKey === 'success' ? '#166534' : u.stateKey === 'running' ? '#1D4ED8' : '#64748B',
+                        background: u.stateKey === 'success' ? '#DCFCE7' : u.stateKey === 'running' ? '#DBEAFE' : '#F1F5F9',
+                        padding: '1px 3px',
+                        borderRadius: 4,
+                        whiteSpace: 'nowrap',
+                        flexShrink: 0
+                      }}>
+                        {u.stateLabel?.replace('정주행 중', '주행중') || '대기'}
                       </span>
-                    </td>
-                    <td
-                      style={{
-                        borderBottom: '1px solid #E2E8F0',
-                        padding: 6,
-                        textAlign: 'center',
-                      }}
-                    >
-                      <div style={{ display: 'flex', justifyContent: 'center', gap: 4 }}>
-                        {u.medals && (u.medals.gold || 0) > 0 && (
-                          <div className="medal-wrapper">
-                            <span className="medal-icon">🥇</span>
-                            <span className="medal-count">{u.medals.gold}</span>
+                    </div>
+                    <div style={{
+                      fontSize: 13,
+                      fontWeight: 900,
+                      textAlign: 'right',
+                      whiteSpace: 'nowrap',
+                      color: '#0F172A',
+                      flexShrink: 0
+                    }}>
+                      {u.chapters}장 <span style={{ color: '#1D4ED8' }}>{u.progress}%</span>
+                    </div>
+                  </div>
+
+                  {/* 둘째줄: 메달 & 완독정보 */}
+                  <div style={{
+                    display: 'flex',
+                    justifyContent: 'space-between',
+                    alignItems: 'center',
+                    marginTop: 'auto',
+                    background: '#F1F5F9',
+                    padding: '4px 10px',
+                    borderRadius: 10
+                  }}>
+                    <div style={{ display: 'flex', gap: 4 }}>
+                      {['gold', 'silver', 'bronze'].map(m => {
+                        const count = u.medals?.[m] || 0;
+                        if (count === 0) return null;
+                        return (
+                          <div key={m} style={{ position: 'relative', display: 'flex', alignItems: 'center' }}>
+                            <span style={{ fontSize: 18 }}>{m === 'gold' ? '🥇' : m === 'silver' ? '🥈' : '🥉'}</span>
+                            <span style={{
+                              position: 'absolute',
+                              top: -4,
+                              right: -4,
+                              background: '#1E293B',
+                              color: '#fff',
+                              fontSize: 8,
+                              fontWeight: 900,
+                              padding: '0px 3px',
+                              borderRadius: 4,
+                              minWidth: 12,
+                              textAlign: 'center'
+                            }}>{count}</span>
                           </div>
-                        )}
-                        {u.medals && (u.medals.silver || 0) > 0 && (
-                          <div className="medal-wrapper">
-                            <span className="medal-icon">🥈</span>
-                            <span className="medal-count">{u.medals.silver}</span>
-                          </div>
-                        )}
-                        {u.medals && (u.medals.bronze || 0) > 0 && (
-                          <div className="medal-wrapper">
-                            <span className="medal-icon">🥉</span>
-                            <span className="medal-count">{u.medals.bronze}</span>
-                          </div>
-                        )}
+                        );
+                      })}
+                      {!Object.values(u.medals || {}).some(v => v > 0) && (
+                        <span style={{ fontSize: 10, color: '#94A3B8' }}>-</span>
+                      )}
+                    </div>
+
+                    {u.dokStatus && u.dokStatus.totalDok > 0 && (
+                      <div style={{
+                        fontSize: 12,
+                        fontWeight: 900,
+                        color: '#B45309',
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: 1
+                      }}>
+                        📖{u.dokStatus.totalDok}독
                       </div>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
+                    )}
+                  </div>
+                </div>
+              ))}
+            </div>
+          );
+        })()}
       </div>
 
       {/* 하단 홈으로 버튼 (기존) */}

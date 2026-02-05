@@ -159,36 +159,34 @@ export function calculateMonthlyRankingForMonth(crewsData = {}, usersMap = {}, y
     });
   });
 
-  // 메달 기준: 절대 "진행률"이나 "순위"가 아니라, 장수 기준
-  const GOLD_CHAPTERS = 1189; // 성경 전체 완독
-  const SILVER_CHAPTERS = 929; // 구약 완독
-  const BRONZE_CHAPTERS = 260; // 신약 완독
-
   // usersMap을 붙이고, 각 반 기준으로 장수 조건이 충족된 경우에만 메달 부여
   const list = Object.values(userTotals).map((u) => {
     const info = usersMap[u.uid] || {};
     const crew = info.crew || u.crew;
     let medal = null;
 
-    // 각 반별 이번 달 전체 목표 장수 계산 (이미 portionByCrewAndDate에 계산되어 있음)
+    // 각 반별 이번 달 전체 목표 장수 계산
     const crewPortions = portionByCrewAndDate[crew] || {};
     let totalTargetChapters = 0;
     Object.values(crewPortions).forEach(p => {
       totalTargetChapters += (p.chapters || 0);
     });
 
-    if (crew === '고급반' && u.chapters >= GOLD_CHAPTERS && u.chapters >= totalTargetChapters) {
-      medal = 'gold';
-    } else if (crew === '중급반' && u.chapters >= SILVER_CHAPTERS && u.chapters >= totalTargetChapters) {
-      medal = 'silver';
-    } else if (
-      (crew === '초급반' || crew.includes('초급반') || crew.includes('파노라마')) &&
-      u.chapters >= totalTargetChapters &&
-      totalTargetChapters > 0
-    ) {
-      // 신약초급, 구약초급A/B, 신/구약 파노라마 모두 포함
-      // 기준: 해당 반의 월간 전체 분량을 모두 읽었을 때 동메달
-      medal = 'bronze';
+    const isComplete = u.chapters >= totalTargetChapters && totalTargetChapters > 0;
+
+    if (isComplete) {
+      if (crew === '고급반') {
+        medal = 'gold';
+      } else if (crew === '중급반') {
+        medal = 'silver';
+      } else if (
+        crew === '초급반' ||
+        crew.includes('초급반') ||
+        crew.includes('파노라마')
+      ) {
+        // 구약A, 구약B, 신약초급, 파노라마 모두 동메달
+        medal = 'bronze';
+      }
     }
 
     return {

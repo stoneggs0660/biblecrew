@@ -10,6 +10,7 @@ import {
   getCurrentYMKey // 필요할 수 있음
 } from '../firebaseSync';
 import { getCrewLabel } from '../utils/crewConfig';
+import { calculateDokStatus } from '../utils/dokUtils';
 
 export default function Home({ user }) {
   const navigate = useNavigate();
@@ -103,7 +104,7 @@ export default function Home({ user }) {
       <h1 style={{ fontSize: 32, marginBottom: 10, textAlign: 'center' }}>
         성경러닝크루 홈
       </h1>
-      <p style={{ textAlign: 'center', marginBottom: 10 }}>
+      <p style={{ textAlign: 'center', marginBottom: 20 }}>
         환영합니다, {name}님
       </p>
       {!user && (
@@ -176,7 +177,13 @@ export default function Home({ user }) {
         </button>
         <button
           style={btnStyle('#0F3455')}
-          onClick={() => navigate('/admin-login')}
+          onClick={() => {
+            if (user?.isAdmin) {
+              navigate('/admin');
+            } else {
+              navigate('/admin-login');
+            }
+          }}
         >
           ⚙️ 관리자 모드
         </button>

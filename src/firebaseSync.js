@@ -364,13 +364,13 @@ export function subscribeToMonthlyMedalStatus(year, month2, callback) {
   return unsubscribe;
 }
 
-// ✅ 명예의 전당: 월 데이터 저장 (금/은/동) - 안전한(중복방지) 버전
-export async function saveMonthlyHallOfFame(year, month, ranking) {
+// ✅ 명예의 전당: 월 데이터 저장 (금/은/동 + 1독 달성자)
+export async function saveMonthlyHallOfFame(year, month, ranking, dokAchievers = []) {
   const db2 = getDatabase();
   const monthStr = String(month).padStart(2, '0');
   const ymKey = `${year}-${monthStr}`;
 
-  // 1. 저장할 데이터 구조 준비 (신규/구조 통합)
+  // 1. 저장할 데이터 구조 준비
   const resultsByMedal = { gold: [], silver: [], bronze: [] };
   const legacyPayload = { gold: {}, silver: {}, bronze: {} };
 
@@ -425,6 +425,9 @@ export async function saveMonthlyHallOfFame(year, month, ranking) {
   for (const medal of ['gold', 'silver', 'bronze']) {
     tasks.push(set(ref(db2, `hallOfFame/${year}/monthlyResults/${monthStr}/${medal}`), resultsByMedal[medal]));
   }
+  // 1독 달성자 저장
+  tasks.push(set(ref(db2, `hallOfFame/${year}/monthlyResults/${monthStr}/dokAchievers`), dokAchievers));
+
   // 구버전 경로 호환성 유지: hallOfFame/monthly/{year}/{month}
   tasks.push(set(ref(db2, `hallOfFame/monthly/${year}/${month}`), legacyPayload));
 
@@ -724,6 +727,7 @@ export async function loginOrRegisterUser(name, password) {
       password: trimmedPassword,
       crew: null,
       status: 'active',
+      isAdmin: false, // 기본값 추가
       hiddenUnassigned: false,
       mustChangePassword: false,
       createdAt: Date.now(),
@@ -732,7 +736,8 @@ export async function loginOrRegisterUser(name, password) {
     return { uid, ...newUser };
   }
 
-  // 기존 사용자: 비밀번호가 이미 저장된 경우 검증
+  // 기존 사용자: 관리자 권한 포함 반환
+  const isAdmin = !!userData.isAdmin;
   if (userData.password) {
     if (userData.password !== rawPassword && userData.password !== trimmedPassword) {
       const err = new Error('비밀번호가 올바르지 않습니다.');
@@ -751,7 +756,7 @@ export async function loginOrRegisterUser(name, password) {
     await set(userRef, userData);
   }
 
-  return { uid, ...userData };
+  return { uid, isAdmin, ...userData };
 }
 
 // 관리자에 의한 사용자 비밀번호 초기화 (0000 + mustChangePassword=true)

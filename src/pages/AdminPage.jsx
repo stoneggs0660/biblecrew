@@ -49,9 +49,22 @@ import { calculateMonthlyRankingForMonth } from '../utils/rankingUtils';
 import { getMonthDates } from '../utils/dateUtils';
 import { getDailyBiblePortionByCrew } from '../utils/bibleUtils';
 import { getTodayCrewState } from '../utils/crewStatusUtils';
+import { calculateDokStatus } from '../utils/dokUtils';
 
-export default function AdminPage() {
+export default function AdminPage({ user }) {
   const navigate = useNavigate();
+
+  // ✅ 보안 강화: 관리자 권한 체크 (비밀번호 로그인 없이 온 경우 대비)
+  useEffect(() => {
+    // 1. 유저 정보가 없거나 관리자가 아닌 경우
+    if (!user || !user.isAdmin) {
+      // 2. 관리자 로그인 페이지로 안내 (비밀번호가 최후의 수단)
+      // 단, 비밀번호를 막 치고 들어온 직후를 위해 약간의 유예를 두거나 
+      // 현재는 간단히 알림 후 이동 처리
+      console.warn('관리자 권한이 없습니다. 로그인 페이지로 이동합니다.');
+      navigate('/admin-login');
+    }
+  }, [user, navigate]);
   const [users, setUsers] = useState({});
   const [crews, setCrews] = useState({});
   const [crewStatus, setCrewStatus] = useState(() => {
@@ -236,6 +249,8 @@ export default function AdminPage() {
       userDailyActivity: info.dailyActivity || {},
     });
 
+    const dokStatus = calculateDokStatus(info.earnedMedals || {});
+
     targetStatusObj[crew].push({
       uid,
       name,
@@ -243,6 +258,8 @@ export default function AdminPage() {
       progress,
       stateKey: state.key,
       stateLabel: state.label,
+      medals: info.medals || {},
+      dokStatus: dokStatus // { totalDok, fragments }
     });
   }
 
@@ -639,8 +656,33 @@ export default function AdminPage() {
       return;
     }
 
-    // 1. 명예의 전당 저장
-    const p1 = saveMonthlyHallOfFame(year, month, ranking);
+    const monthStr = String(month).padStart(2, '0');
+    const ymKey = `${year}-${monthStr}`;
+
+    // 1독 달성자 판별 (이번 달 수료로 인해 1독이 추가된 사람)
+    const dokAchievers = [];
+    ranking.forEach(r => {
+      if (!r.medal) return;
+      const userInfo = users[r.uid];
+      if (!userInfo) return;
+
+      const currentMedals = userInfo.earnedMedals || {};
+      // 이번 달 조각을 포함한 상태의 1독 수
+      const after = calculateDokStatus({ ...currentMedals, [`${ymKey}_${r.crew}`]: r.medal });
+      // 이번 달 조각을 제외한 상태의 1독 수
+      const before = calculateDokStatus(currentMedals);
+
+      if (after.totalDok > before.totalDok) {
+        dokAchievers.push({
+          name: r.name,
+          uid: r.uid,
+          dokCount: after.totalDok
+        });
+      }
+    });
+
+    // 1. 명예의 전당 저장 (1독 달성자 포함)
+    const p1 = saveMonthlyHallOfFame(year, month, ranking, dokAchievers);
 
     // 2. 월별 결과 보고서 데이터 생성 및 저장
     const reportPayload = {};
@@ -648,14 +690,17 @@ export default function AdminPage() {
       const userMedals = users[r.uid]?.medals || {};
       const totalMedalsCount = (userMedals.gold || 0) + (userMedals.silver || 0) + (userMedals.bronze || 0);
 
+      const dokStatus = calculateDokStatus(users[r.uid]?.earnedMedals || {});
+
       reportPayload[r.uid] = {
         uid: r.uid,
         name: r.name,
         crew: r.crew,
         chapters: r.chapters,
-        progress: 100, // 완주 데이터 기준이므로 100(%) 혹은 실제 계산값
+        progress: 100,
         stateLabel: r.medal ? '성공' : '실패',
-        totalMedals: totalMedalsCount
+        totalMedals: totalMedalsCount,
+        totalDok: dokStatus.totalDok // 추가
       };
     });
     const p2 = saveMonthlyReport(year, month, reportPayload);
@@ -1770,6 +1815,7 @@ export default function AdminPage() {
                             <th style={{ borderBottom: '1px solid #ccc', textAlign: 'right', padding: 4 }}>읽은 장</th>
                             <th style={{ borderBottom: '1px solid #ccc', textAlign: 'right', padding: 4 }}>진행률</th>
                             <th style={{ borderBottom: '1px solid #ccc', textAlign: 'center', padding: 4 }}>상태</th>
+                            <th style={{ borderBottom: '1px solid #ccc', textAlign: 'center', padding: 4, minWidth: 100 }}>메달/1독</th>
                             <th style={{ borderBottom: '1px solid #ccc', textAlign: 'center', padding: 4 }}>비번 초기화</th>
                           </tr>
                         </thead>
@@ -1817,6 +1863,27 @@ export default function AdminPage() {
 
                                   return <span style={style}>{label}</span>;
                                 })()}
+                              </td>
+                              <td style={{ borderBottom: '1px solid #eee', padding: 4, textAlign: 'center' }}>
+                                <div style={{ fontSize: 11 }}>
+                                  {(u.medals.gold || u.medals.silver || u.medals.bronze) ? (
+                                    <div style={{ marginBottom: 2 }}>
+                                      {u.medals.gold > 0 && `🥇${u.medals.gold} `}
+                                      {u.medals.silver > 0 && `🥈${u.medals.silver} `}
+                                      {u.medals.bronze > 0 && `🥉${u.medals.bronze}`}
+                                    </div>
+                                  ) : null}
+                                  {u.dokStatus && (
+                                    <div style={{ fontWeight: 800, color: '#1D3557' }}>
+                                      📖 {u.dokStatus.totalDok}독
+                                      {u.dokStatus.fragments && u.dokStatus.fragments.length > 0 && (
+                                        <div style={{ fontSize: 9, fontWeight: 400, color: '#666' }}>
+                                          (+{u.dokStatus.fragments.map(f => f.name.replace('초급반', '초')).join(',')})
+                                        </div>
+                                      )}
+                                    </div>
+                                  )}
+                                </div>
                               </td>
                               <td style={{ borderBottom: '1px solid #eee', padding: 4, textAlign: 'center' }}>
                                 <button

@@ -12,19 +12,42 @@ import CrewPage from './components/CrewPage.jsx';
 import Records from './pages/Records.jsx';
 import BibleReadingPage from './pages/BibleReadingPage.jsx';
 import CrewMembers from './pages/CrewMembers.jsx';
+import { getDatabase, ref, onValue } from 'firebase/database'; // Import Firebase database functions
 
 export default function RootApp() {
   const [user, setUser] = useState(null);
 
   // 앱 시작 시 로컬스토리지에서 사용자 정보 복원
   useEffect(() => {
-    try {
-      const saved = localStorage.getItem('biblecrew_user');
-      if (saved) {
-        setUser(JSON.parse(saved));
+    const saved = localStorage.getItem('biblecrew_user');
+    if (saved) {
+      try {
+        const parsed = JSON.parse(saved);
+        if (parsed && parsed.uid) {
+          // 실시간 구독으로 변경하여 최신 정보(메달 등) 유지
+          const db2 = getDatabase();
+          const userRef = ref(db2, `users/${parsed.uid}`);
+          const unsub = onValue(userRef, (snap) => {
+            const data = snap.val();
+            if (data) {
+              const updated = {
+                uid: parsed.uid,
+                name: data.name || parsed.name,
+                crew: data.crew || null,
+                isAdmin: !!data.isAdmin,
+                medals: data.medals || {},
+                earnedMedals: data.earnedMedals || {},
+                mustChangePassword: !!data.mustChangePassword
+              };
+              setUser(updated);
+              localStorage.setItem('biblecrew_user', JSON.stringify(updated));
+            }
+          });
+          return () => unsub();
+        }
+      } catch (e) {
+        console.error('로그인 정보 로드 실패', e);
       }
-    } catch (e) {
-      console.error(e);
     }
   }, []);
 
@@ -32,7 +55,15 @@ export default function RootApp() {
     const trimmed = (name || '').trim();
     if (!trimmed) return null;
     const user = await loginOrRegisterUser(trimmed, password || '');
-    const stored = { uid: user.uid, name: user.name || trimmed, crew: user.crew || null, mustChangePassword: !!user.mustChangePassword };
+    const stored = {
+      uid: user.uid,
+      name: user.name || trimmed,
+      crew: user.crew || null,
+      isAdmin: !!user.isAdmin, // 관리자 여부 추가
+      medals: user.medals || {}, // 추가
+      earnedMedals: user.earnedMedals || {}, // 추가
+      mustChangePassword: !!user.mustChangePassword
+    };
     setUser(stored);
     localStorage.setItem('biblecrew_user', JSON.stringify(stored));
     return stored;
@@ -61,7 +92,7 @@ export default function RootApp() {
         <Route path='/명예의전당' element={<HallOfFame />} />
         <Route path='/records' element={<Records user={user} />} />
         <Route path='/성경읽기' element={<BibleReadingPage user={user} />} />
-        <Route path='/admin' element={<AdminPage />} />
+        <Route path='/admin' element={<AdminPage user={user} />} />
         <Route path='/admin/class-notice' element={<ClassNoticePage />} />
       </Routes>
     </HashRouter>

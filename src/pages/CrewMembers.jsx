@@ -209,20 +209,20 @@ export default function CrewMembers({ user }) {
                 >
                   <thead>
                     <tr>
-                      <th style={{ borderBottom: '1px solid #CBD5E1', padding: 6, textAlign: 'left' }}>이름</th>
-                      <th style={{ borderBottom: '1px solid #CBD5E1', padding: 6, textAlign: 'right' }}>진행률</th>
-                      <th style={{ borderBottom: '1px solid #CBD5E1', padding: 6, textAlign: 'right' }}>읽은 장</th>
-                      <th style={{ borderBottom: '1px solid #CBD5E1', padding: 6, textAlign: 'center' }}>상태</th>
-                      <th style={{ borderBottom: '1px solid #CBD5E1', padding: 6, textAlign: 'center' }}>메달</th>
+                      <th style={{ borderBottom: '1px solid #CBD5E1', padding: '6px 2px', textAlign: 'left', width: '20%', whiteSpace: 'nowrap' }}>이름</th>
+                      <th style={{ borderBottom: '1px solid #CBD5E1', padding: '6px 2px', textAlign: 'right', width: '12%', whiteSpace: 'nowrap' }}>진행</th>
+                      <th style={{ borderBottom: '1px solid #CBD5E1', padding: '6px 2px', textAlign: 'right', width: '15%', whiteSpace: 'nowrap' }}>읽은장</th>
+                      <th style={{ borderBottom: '1px solid #CBD5E1', padding: '6px 2px', textAlign: 'center', width: '20%', whiteSpace: 'nowrap' }}>상태</th>
+                      <th style={{ borderBottom: '1px solid #CBD5E1', padding: '6px 2px', textAlign: 'center', width: '33%', whiteSpace: 'nowrap' }}>메달</th>
                     </tr>
                   </thead>
                   <tbody>
                     {list.map((u) => (
                       <tr key={u.uid}>
-                        <td style={{ borderBottom: '1px solid #E2E8F0', padding: 6 }}>{u.name}</td>
-                        <td style={{ borderBottom: '1px solid #E2E8F0', padding: 6, textAlign: 'right' }}>{u.progress}%</td>
-                        <td style={{ borderBottom: '1px solid #E2E8F0', padding: 6, textAlign: 'right' }}>{u.chapters}장</td>
-                        <td style={{ borderBottom: '1px solid #E2E8F0', padding: 6, textAlign: 'center' }}>
+                        <td style={{ borderBottom: '1px solid #E2E8F0', padding: '4px 2px', maxWidth: 65, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{u.name}</td>
+                        <td style={{ borderBottom: '1px solid #E2E8F0', padding: '4px 2px', textAlign: 'right' }}>{u.progress}%</td>
+                        <td style={{ borderBottom: '1px solid #E2E8F0', padding: '4px 2px', textAlign: 'right', whiteSpace: 'nowrap' }}>{u.chapters}장</td>
+                        <td style={{ borderBottom: '1px solid #E2E8F0', padding: '4px 2px', textAlign: 'center' }}>
                           {(() => {
                             const label = u.stateLabel || '🟢 오늘준비';
                             const key = u.stateKey || '';
@@ -241,9 +241,10 @@ export default function CrewMembers({ user }) {
 
                             const style = {
                               display: 'inline-block',
-                              borderRadius: 8,
-                              padding: '4px 16px',
-                              fontWeight: 600,
+                              borderRadius: 6,
+                              padding: '2px 5px',
+                              fontWeight: 700,
+                              fontSize: 11,
                               backgroundColor: isSuccess
                                 ? '#DCFCE7'
                                 : isRunning
@@ -254,26 +255,27 @@ export default function CrewMembers({ user }) {
                                 : isRunning
                                   ? '#1D4ED8'
                                   : '#111827',
+                              whiteSpace: 'nowrap'
                             };
 
                             return <span style={style}>{label}</span>;
                           })()}
                         </td>
-                        <td style={{ borderBottom: '1px solid #E2E8F0', padding: 6, textAlign: 'center' }}>
-                          <div style={{ display: 'flex', justifyContent: 'center', gap: 4 }}>
+                        <td style={{ borderBottom: '1px solid #E2E8F0', padding: '4px', textAlign: 'center' }}>
+                          <div style={{ display: 'flex', justifyContent: 'center', gap: 3, fontSize: 13 }}>
                             {(u.medals?.gold || 0) > 0 && (
-                              <div>
-                                <span>🥇</span> <b>{u.medals.gold}</b>
+                              <div style={{ display: 'flex', alignItems: 'center' }}>
+                                <span>🥇</span><b style={{ marginLeft: 1 }}>{u.medals.gold}</b>
                               </div>
                             )}
                             {(u.medals?.silver || 0) > 0 && (
-                              <div>
-                                <span>🥈</span> <b>{u.medals.silver}</b>
+                              <div style={{ display: 'flex', alignItems: 'center' }}>
+                                <span>🥈</span><b style={{ marginLeft: 1 }}>{u.medals.silver}</b>
                               </div>
                             )}
                             {(u.medals?.bronze || 0) > 0 && (
-                              <div>
-                                <span>🥉</span> <b>{u.medals.bronze}</b>
+                              <div style={{ display: 'flex', alignItems: 'center' }}>
+                                <span>🥉</span><b style={{ marginLeft: 1 }}>{u.medals.bronze}</b>
                               </div>
                             )}
                           </div>
