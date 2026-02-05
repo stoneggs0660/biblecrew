@@ -1163,124 +1163,100 @@ export default function CrewPage({ crewName, user }) {
           }
 
           return (
-            <div style={{
-              display: 'grid',
-              gridTemplateColumns: 'repeat(auto-fill, minmax(160px, 1fr))',
-              gap: 10
-            }}>
-              {crewStatus.map((u) => (
-                <div key={u.uid} style={{
-                  background: '#fff',
-                  borderRadius: 16,
-                  padding: '16px',
-                  border: '1px solid #E2E8F0',
-                  display: 'flex',
-                  flexDirection: 'column',
-                  gap: 10,
-                  boxShadow: '0 2px 6px rgba(0,0,0,0.03)',
-                  transition: 'transform 0.2s ease',
-                }}>
-                  {/* 첫째줄: 이름 상태 장수 (%) 모두 한 줄 배치 (크기 최적화) */}
-                  <div style={{
-                    display: 'flex',
-                    justifyContent: 'space-between',
-                    alignItems: 'center',
-                    gap: 2
-                  }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 2, minWidth: 0, flex: 1 }}>
-                      <span style={{
-                        fontSize: 15,
-                        fontWeight: 800,
-                        color: '#1E293B',
-                        whiteSpace: 'nowrap',
-                        overflow: 'hidden',
-                        textOverflow: 'ellipsis'
-                      }}>{u.name}</span>
-                      <span style={{
-                        fontSize: 10,
-                        fontWeight: 700,
-                        color: u.stateKey === 'success' ? '#166534' : u.stateKey === 'running' ? '#1D4ED8' : '#64748B',
-                        background: u.stateKey === 'success' ? '#DCFCE7' : u.stateKey === 'running' ? '#DBEAFE' : '#F1F5F9',
-                        padding: '1px 3px',
-                        borderRadius: 4,
-                        whiteSpace: 'nowrap',
-                        flexShrink: 0
-                      }}>
-                        {u.stateLabel?.replace('정주행 중', '주행중') || '대기'}
-                      </span>
-                    </div>
-                    <div style={{
-                      fontSize: 13,
-                      fontWeight: 900,
-                      textAlign: 'right',
-                      whiteSpace: 'nowrap',
-                      color: '#0F172A',
-                      flexShrink: 0
-                    }}>
-                      {u.chapters}장 <span style={{ color: '#1D4ED8' }}>{u.progress}%</span>
-                    </div>
-                  </div>
+            <div style={{ overflowX: 'auto' }}>
+              <table
+                style={{
+                  width: '100%',
+                  borderCollapse: 'collapse',
+                  fontSize: 12,
+                  background: '#F8FAFF',
+                  borderRadius: 12,
+                }}
+              >
+                <thead>
+                  <tr>
+                    <th style={{ borderBottom: '1px solid #CBD5E1', padding: '6px 2px', textAlign: 'left', width: '20%', whiteSpace: 'nowrap' }}>이름</th>
+                    <th style={{ borderBottom: '1px solid #CBD5E1', padding: '6px 2px', textAlign: 'right', width: '12%', whiteSpace: 'nowrap' }}>진행</th>
+                    <th style={{ borderBottom: '1px solid #CBD5E1', padding: '6px 2px', textAlign: 'right', width: '15%', whiteSpace: 'nowrap' }}>읽은장</th>
+                    <th style={{ borderBottom: '1px solid #CBD5E1', padding: '6px 2px', textAlign: 'center', width: '20%', whiteSpace: 'nowrap' }}>상태</th>
+                    <th style={{ borderBottom: '1px solid #CBD5E1', padding: '6px 2px', textAlign: 'center', width: '33%', whiteSpace: 'nowrap' }}>메달</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {crewStatus.map((u) => (
+                    <tr key={u.uid}>
+                      <td style={{ borderBottom: '1px solid #E2E8F0', padding: '4px 2px', maxWidth: 65, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{u.name}</td>
+                      <td style={{ borderBottom: '1px solid #E2E8F0', padding: '4px 2px', textAlign: 'right' }}>{u.progress}%</td>
+                      <td style={{ borderBottom: '1px solid #E2E8F0', padding: '4px 2px', textAlign: 'right', whiteSpace: 'nowrap' }}>{u.chapters}장</td>
+                      <td style={{ borderBottom: '1px solid #E2E8F0', padding: '4px 2px', textAlign: 'center' }}>
+                        {(() => {
+                          const label = u.stateLabel || '🟢 오늘준비';
+                          const key = u.stateKey || '';
+                          const isSuccess = key === 'success' || label.includes('성공');
+                          const isReady = key === 'ready' || label.includes('오늘준비');
+                          const isRunning = key === 'running' || label.includes('러닝');
+                          const isFail = key === 'fail' || label.includes('힘을내!') || key === 'shortage';
 
-                  {/* 둘째줄: 메달 & 완독정보 */}
-                  <div style={{
-                    display: 'flex',
-                    justifyContent: 'space-between',
-                    alignItems: 'center',
-                    marginTop: 'auto',
-                    background: '#F1F5F9',
-                    padding: '4px 10px',
-                    borderRadius: 10
-                  }}>
-                    <div style={{ display: 'flex', gap: 4 }}>
-                      {['gold', 'silver', 'bronze'].map(m => {
-                        const count = u.medals?.[m] || 0;
-                        if (count === 0) return null;
-                        return (
-                          <div key={m} style={{ position: 'relative', display: 'flex', alignItems: 'center' }}>
-                            <span style={{ fontSize: 18 }}>{m === 'gold' ? '🥇' : m === 'silver' ? '🥈' : '🥉'}</span>
-                            <span style={{
-                              position: 'absolute',
-                              top: -4,
-                              right: -4,
-                              background: '#1E293B',
-                              color: '#fff',
-                              fontSize: 8,
-                              fontWeight: 900,
-                              padding: '0px 3px',
-                              borderRadius: 4,
-                              minWidth: 12,
-                              textAlign: 'center'
-                            }}>{count}</span>
-                          </div>
-                        );
-                      })}
-                      {!Object.values(u.medals || {}).some(v => v > 0) && (
-                        <span style={{ fontSize: 10, color: '#94A3B8' }}>-</span>
-                      )}
-                    </div>
+                          if (isReady) {
+                            return (
+                              <span style={{ color: '#166534', fontWeight: 600 }}>
+                                {label}
+                              </span>
+                            );
+                          }
 
-                    {u.dokStatus && u.dokStatus.totalDok > 0 && (
-                      <div style={{
-                        fontSize: 12,
-                        fontWeight: 900,
-                        color: '#B45309',
-                        display: 'flex',
-                        alignItems: 'center',
-                        gap: 1
-                      }}>
-                        📖{u.dokStatus.totalDok}독
-                      </div>
-                    )}
-                  </div>
-                </div>
-              ))}
+                          const style = {
+                            display: 'inline-block',
+                            borderRadius: 6,
+                            padding: '2px 5px',
+                            fontWeight: 700,
+                            fontSize: 11,
+                            backgroundColor: isSuccess
+                              ? '#DCFCE7'
+                              : isRunning
+                                ? '#DBEAFE'
+                                : '#E5E7EB',
+                            color: isSuccess
+                              ? '#166534'
+                              : isRunning
+                                ? '#1D4ED8'
+                                : '#111827',
+                            whiteSpace: 'nowrap'
+                          };
+
+                          return <span style={style}>{label}</span>;
+                        })()}
+                      </td>
+                      <td style={{ borderBottom: '1px solid #E2E8F0', padding: '4px', textAlign: 'center' }}>
+                        <div style={{ display: 'flex', justifyContent: 'center', gap: 3, fontSize: 13 }}>
+                          {(u.medals?.gold || 0) > 0 && (
+                            <div style={{ display: 'flex', alignItems: 'center' }}>
+                              <span>🥇</span><b style={{ marginLeft: 1 }}>{u.medals.gold}</b>
+                            </div>
+                          )}
+                          {(u.medals?.silver || 0) > 0 && (
+                            <div style={{ display: 'flex', alignItems: 'center' }}>
+                              <span>🥈</span><b style={{ marginLeft: 1 }}>{u.medals.silver}</b>
+                            </div>
+                          )}
+                          {(u.medals?.bronze || 0) > 0 && (
+                            <div style={{ display: 'flex', alignItems: 'center' }}>
+                              <span>🥉</span><b style={{ marginLeft: 1 }}>{u.medals.bronze}</b>
+                            </div>
+                          )}
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
             </div>
           );
         })()}
       </div>
 
       {/* 하단 홈으로 버튼 (기존) */}
-      <div style={{ marginTop: 20, textAlign: 'center' }}>
+      < div style={{ marginTop: 20, textAlign: 'center' }}>
         <button
           onClick={() => navigate('/home')}
           style={{
@@ -1297,8 +1273,8 @@ export default function CrewPage({ crewName, user }) {
         >
           ← 홈으로
         </button>
-      </div>
-    </div>
+      </div >
+    </div >
   );
 }
 
