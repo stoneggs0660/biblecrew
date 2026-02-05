@@ -145,6 +145,9 @@ export default function AdminPage({ user }) {
   const [startMonthLoading, setStartMonthLoading] = useState(false);
   const [currentSnapshot, setCurrentSnapshot] = useState({}); // 배정 확정 시점 스냅샷
   const [activeTab, setActiveTab] = useState('group1'); // [추가] 탭 상태: group1, group2, group3, group4
+  const [refineYear, setRefineYear] = useState(new Date().getFullYear());
+  const [refineMonth, setRefineMonth] = useState(new Date().getMonth() === 0 ? 12 : new Date().getMonth());
+  const [refineLoading, setRefineLoading] = useState(false);
 
   const checksUnsubRef = useRef(null);
 
@@ -359,7 +362,7 @@ export default function AdminPage({ user }) {
 
   // ✅ [최적화] 그룹 3(현황/수정)이 열릴 때만 무거운 체크 데이터를 구독합니다.
   useEffect(() => {
-    if (activeTab !== 'group3') {
+    if (activeTab !== 'group3' && activeTab !== 'group4') {
       setCrews({}); // 탭이 닫히면 데이터 비우기
       return;
     }
@@ -710,6 +713,74 @@ export default function AdminPage({ user }) {
       // 보고서 목록 아카이브 갱신
       getMonthlyReportMonths().then(setReportMonths);
     });
+  }
+
+  // ✅ 과거 데이터 재집계 및 업데이트 핸들러
+  async function handleRefineMonthlyData() {
+    if (!window.confirm(`${refineYear}년 ${refineMonth}월 데이터를 현재 체크 기록 기준으로 다시 집계하시겠습니까?\n(보고서, 명예의 전당, 개인 1독 기록이 모두 업데이트됩니다.)`)) return;
+
+    setRefineLoading(true);
+    try {
+      const { ranking } = calculateMonthlyRankingForMonth(crews, users, refineYear, refineMonth);
+      if (!ranking || ranking.length === 0) {
+        alert('집계할 데이터가 없습니다. (해당 월에 배정되거나 체크한 인원이 없음)');
+        return;
+      }
+
+      const monthStr = String(refineMonth).padStart(2, '0');
+      const targetYmKey = `${refineYear}-${monthStr}`;
+
+      // 1독 달성자 판별 로직
+      const dokAchievers = [];
+      ranking.forEach(r => {
+        if (!r.medal) return;
+        const userInfo = users[r.uid];
+        if (!userInfo) return;
+
+        const currentMedals = userInfo.earnedMedals || {};
+        const after = calculateDokStatus({ ...currentMedals, [`${targetYmKey}_${r.crew}`]: r.medal });
+        const before = calculateDokStatus(currentMedals);
+
+        if (after.totalDok > before.totalDok) {
+          dokAchievers.push({
+            name: r.name,
+            uid: r.uid,
+            dokCount: after.totalDok
+          });
+        }
+      });
+
+      // 1. 명예의 전당 저장 (기존 데이터 덮어쓰기)
+      await saveMonthlyHallOfFame(refineYear, refineMonth, ranking, dokAchievers);
+
+      // 2. 월별 결과 보고서 업데이트
+      const reportPayload = {};
+      ranking.forEach((r) => {
+        const userMedals = users[r.uid]?.medals || {};
+        const totalMedalsCount = (userMedals.gold || 0) + (userMedals.silver || 0) + (userMedals.bronze || 0);
+        const dokStatus = calculateDokStatus(users[r.uid]?.earnedMedals || {});
+
+        reportPayload[r.uid] = {
+          uid: r.uid,
+          name: r.name,
+          crew: r.crew,
+          chapters: r.chapters,
+          progress: 100,
+          stateLabel: r.medal ? '성공' : '실패',
+          totalMedals: totalMedalsCount,
+          totalDok: dokStatus.totalDok
+        };
+      });
+      await saveMonthlyReport(refineYear, refineMonth, reportPayload);
+
+      alert(`${refineYear}년 ${refineMonth}월 데이터 업데이트가 완료되었습니다.`);
+      getMonthlyReportMonths().then(setReportMonths);
+    } catch (e) {
+      console.error('데이터 업데이트 오류', e);
+      alert('업데이트 과정에서 오류가 발생했습니다.');
+    } finally {
+      setRefineLoading(false);
+    }
   }
 
 
@@ -2227,6 +2298,52 @@ export default function AdminPage({ user }) {
 
       {activeTab === 'group4' && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
+          {/* ✅ 과거 기록 재집계 및 업데이트 전용 섹션 */}
+          <div
+            style={{
+              padding: 16,
+              borderRadius: 12,
+              background: '#FFF9DB',
+              border: '1px solid #FAB005',
+              boxShadow: '0 4px 12px rgba(0,0,0,0.05)',
+            }}
+          >
+            <h3 style={{ marginTop: 0, marginBottom: 8, color: '#E67E22', display: 'flex', alignItems: 'center', gap: 8 }}>
+              🔄 과거 기록 재집계 및 업데이트
+            </h3>
+            <p style={{ fontSize: 13, marginBottom: 15, color: '#666', lineHeight: 1.5 }}>
+              달이 지나고 뒤늦게 체크를 완료한 성도님이 계신가요? <br />
+              해당 월을 선택하고 업데이트 버튼을 누르면 <strong>보고서, 명예의 전당, 개인별 1독 기록</strong>이 현재 체크 기록을 바탕으로 다시 작성됩니다.
+            </p>
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10, alignItems: 'center' }}>
+              <select value={refineYear} onChange={e => setRefineYear(Number(e.target.value))} style={{ padding: '8px 12px', borderRadius: 8, border: '1px solid #FAB005' }}>
+                {[2025, 2026, 2027].map(y => <option key={y} value={y}>{y}년</option>)}
+              </select>
+              <select value={refineMonth} onChange={e => setRefineMonth(Number(e.target.value))} style={{ padding: '8px 12px', borderRadius: 8, border: '1px solid #FAB005' }}>
+                {Array.from({ length: 12 }, (_, i) => i + 1).map(m => <option key={m} value={m}>{m}월</option>)}
+              </select>
+              <button
+                onClick={handleRefineMonthlyData}
+                disabled={refineLoading}
+                style={{
+                  padding: '10px 20px',
+                  borderRadius: 10,
+                  border: 'none',
+                  background: refineLoading ? '#ccc' : '#E67E22',
+                  color: '#fff',
+                  fontWeight: 800,
+                  cursor: refineLoading ? 'not-allowed' : 'pointer',
+                  boxShadow: '0 4px 8px rgba(230, 126, 34, 0.2)'
+                }}
+              >
+                {refineLoading ? '집계 및 업데이트 중...' : '데이터 최신화 업데이트 실행'}
+              </button>
+            </div>
+            <p style={{ fontSize: 11, color: '#E67E22', marginTop: 12, fontWeight: 700 }}>
+              * 주의: 실행 시 해당 월의 기존 보고서 데이터가 현재 체크 데이터로 덮어씌워집니다.
+            </p>
+          </div>
+
           {/* [8] 월별 결과 보고서 */}
           <div
             style={{
