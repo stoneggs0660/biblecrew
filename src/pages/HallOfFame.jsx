@@ -12,7 +12,7 @@ export default function HallOfFame() {
   // 구버전(hallOfFame/monthly/{year}) 데이터(필요시만)
   const [legacyMonthlyData, setLegacyMonthlyData] = useState(null);
   const [monthlyStatus, setMonthlyStatus] = useState({}); // 월중 숫자 현황
-  const [yearlyTop10, setYearlyTop10] = useState([]);
+  const [yearlyTop11, setYearlyTop11] = useState([]);
   const [activeYear, setActiveYear] = useState(null);   // 자동 전환되는 '올해' 기준(설정값)
   const [selectedYear, setSelectedYear] = useState(null); // 사용자가 보고 있는 연도(기본: activeYear)
   const [availableYears, setAvailableYears] = useState([]);
@@ -223,7 +223,7 @@ export default function HallOfFame() {
   // - 폴백: hallOfFame/monthly/{year}/{MM}/{medal}/{uid}.name
   useEffect(() => {
     if (!selectedYear) {
-      setYearlyTop10([]);
+      setYearlyTop11([]);
       return;
     }
 
@@ -298,7 +298,7 @@ export default function HallOfFame() {
       return String(a.name).localeCompare(String(b.name), 'ko');
     });
 
-    setYearlyTop10(list.slice(0, 10));
+    setYearlyTop11(list.slice(0, 11));
   }, [hofYearData, legacyMonthlyData, selectedYear, usersMap]);
 
   const months = useMemo(() => [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12], []);
@@ -361,7 +361,7 @@ export default function HallOfFame() {
 
         <div style={{ display: 'grid', gridTemplateColumns: '1fr', gap: 30 }}>
 
-          {/* 연간 TOP 10 */}
+          {/* 연간 TOP 11 */}
           <section style={{
             background: 'rgba(255,255,255,0.03)',
             borderRadius: 24,
@@ -370,14 +370,14 @@ export default function HallOfFame() {
             boxShadow: '0 20px 50px rgba(0,0,0,0.3)'
           }}>
             <h2 style={{ fontSize: 24, fontWeight: 800, marginBottom: 5, display: 'flex', alignItems: 'center', gap: 10 }}>
-              <span style={{ color: '#F59E0B' }}>🏆</span> {selectedYear}년 명예의 전당 (TOP 10)
+              <span style={{ color: '#F59E0B' }}>🏆</span> {selectedYear}년 명예의 전당 (TOP 11)
             </h2>
             <p style={{ fontSize: 14, color: '#94A3B8', marginBottom: 20, marginLeft: 34 }}>누적 성경 전체완독-메달 점수 랭킹 입니다</p>
-            {yearlyTop10.length === 0 ? (
+            {yearlyTop11.length === 0 ? (
               <p style={{ color: '#64748B', textAlign: 'center' }}>아직 집계된 랭킹이 없습니다.</p>
             ) : (
               <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-                {yearlyTop10.map((u, idx) => (
+                {yearlyTop11.map((u, idx) => (
                   <div key={u.name} style={{
                     display: 'flex',
                     alignItems: 'center',

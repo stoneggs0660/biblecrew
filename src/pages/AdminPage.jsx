@@ -1,6 +1,9 @@
 import { saveChurchName, saveAppDescription, saveBulletinUrl, subscribeToSettings } from '../firebaseSync';
 import React, { useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { db } from '../firebase'; // Import db directly
+import { ref, get } from 'firebase/database'; // Import firebase SDK
+
 import { CREWS, CREW_KEYS, getCrewLabel } from '../utils/crewConfig';
 import {
   subscribeToUsers,
@@ -43,6 +46,7 @@ import {
   applyMonthlyAssignments, // 추가
   subscribeToAssignmentStatus, // 추가
   fetchAssignmentSnapshot, // 추가
+  runMedalFixOps, // ✅ Added Fix Ops Function Import (Will execute fix logic with auth)
 } from '../firebaseSync';
 
 import { calculateMonthlyRankingForMonth } from '../utils/rankingUtils';
@@ -145,9 +149,6 @@ export default function AdminPage({ user }) {
   const [startMonthLoading, setStartMonthLoading] = useState(false);
   const [currentSnapshot, setCurrentSnapshot] = useState({}); // 배정 확정 시점 스냅샷
   const [activeTab, setActiveTab] = useState('group1'); // [추가] 탭 상태: group1, group2, group3, group4
-  const [refineYear, setRefineYear] = useState(new Date().getFullYear());
-  const [refineMonth, setRefineMonth] = useState(new Date().getMonth() === 0 ? 12 : new Date().getMonth());
-  const [refineLoading, setRefineLoading] = useState(false);
 
   const checksUnsubRef = useRef(null);
 
@@ -362,7 +363,7 @@ export default function AdminPage({ user }) {
 
   // ✅ [최적화] 그룹 3(현황/수정)이 열릴 때만 무거운 체크 데이터를 구독합니다.
   useEffect(() => {
-    if (activeTab !== 'group3' && activeTab !== 'group4') {
+    if (activeTab !== 'group3') {
       setCrews({}); // 탭이 닫히면 데이터 비우기
       return;
     }
@@ -715,74 +716,6 @@ export default function AdminPage({ user }) {
     });
   }
 
-  // ✅ 과거 데이터 재집계 및 업데이트 핸들러
-  async function handleRefineMonthlyData() {
-    if (!window.confirm(`${refineYear}년 ${refineMonth}월 데이터를 현재 체크 기록 기준으로 다시 집계하시겠습니까?\n(보고서, 명예의 전당, 개인 1독 기록이 모두 업데이트됩니다.)`)) return;
-
-    setRefineLoading(true);
-    try {
-      const { ranking } = calculateMonthlyRankingForMonth(crews, users, refineYear, refineMonth);
-      if (!ranking || ranking.length === 0) {
-        alert('집계할 데이터가 없습니다. (해당 월에 배정되거나 체크한 인원이 없음)');
-        return;
-      }
-
-      const monthStr = String(refineMonth).padStart(2, '0');
-      const targetYmKey = `${refineYear}-${monthStr}`;
-
-      // 1독 달성자 판별 로직
-      const dokAchievers = [];
-      ranking.forEach(r => {
-        if (!r.medal) return;
-        const userInfo = users[r.uid];
-        if (!userInfo) return;
-
-        const currentMedals = userInfo.earnedMedals || {};
-        const after = calculateDokStatus({ ...currentMedals, [`${targetYmKey}_${r.crew}`]: r.medal });
-        const before = calculateDokStatus(currentMedals);
-
-        if (after.totalDok > before.totalDok) {
-          dokAchievers.push({
-            name: r.name,
-            uid: r.uid,
-            dokCount: after.totalDok
-          });
-        }
-      });
-
-      // 1. 명예의 전당 저장 (기존 데이터 덮어쓰기)
-      await saveMonthlyHallOfFame(refineYear, refineMonth, ranking, dokAchievers);
-
-      // 2. 월별 결과 보고서 업데이트
-      const reportPayload = {};
-      ranking.forEach((r) => {
-        const userMedals = users[r.uid]?.medals || {};
-        const totalMedalsCount = (userMedals.gold || 0) + (userMedals.silver || 0) + (userMedals.bronze || 0);
-        const dokStatus = calculateDokStatus(users[r.uid]?.earnedMedals || {});
-
-        reportPayload[r.uid] = {
-          uid: r.uid,
-          name: r.name,
-          crew: r.crew,
-          chapters: r.chapters,
-          progress: 100,
-          stateLabel: r.medal ? '성공' : '실패',
-          totalMedals: totalMedalsCount,
-          totalDok: dokStatus.totalDok
-        };
-      });
-      await saveMonthlyReport(refineYear, refineMonth, reportPayload);
-
-      alert(`${refineYear}년 ${refineMonth}월 데이터 업데이트가 완료되었습니다.`);
-      getMonthlyReportMonths().then(setReportMonths);
-    } catch (e) {
-      console.error('데이터 업데이트 오류', e);
-      alert('업데이트 과정에서 오류가 발생했습니다.');
-    } finally {
-      setRefineLoading(false);
-    }
-  }
-
 
 
   async function handleManualHallOfFameAdjust() {
@@ -829,9 +762,86 @@ export default function AdminPage({ user }) {
       return;
     }
     setReportLoading(true);
+    console.log("⚡️ [8]번 보고서 실시간 조회 시작 (Live Logic V2):", ym);
     try {
-      const data = await fetchMonthlyReport(ym);
-      setReportData(data);
+      // ✅ [8]번 보고서: 스냅샷 대신 실시간 데이터(Source of Truth) 조회로 변경
+      const [yearStr, monthStr] = ym.split('-');
+      const y = parseInt(yearStr, 10);
+      const m = parseInt(monthStr, 10);
+
+      const dates = getMonthDates(y, m);
+      const totalDays = dates.length;
+
+      // 1. 해당 월 승인 명단 가져오기
+      const appRef = ref(db, `approvals/${ym}`);
+      const appSnap = await get(appRef);
+      const approvals = appSnap.val() || {}; // { [crew]: { [uid]: true, ... } }
+
+      // 2. 전체 유저 가져오기
+      const usersRef = ref(db, 'users');
+      const usersSnap = await get(usersRef);
+      const allUsers = usersSnap.val() || {};
+
+      const liveReport = [];
+
+      for (const crew of CREW_KEYS) {
+        const approvedUids = Object.keys(approvals[crew] || {});
+        // 승인된 유저가 없으면 패스
+        if (approvedUids.length === 0) continue;
+
+        // 최적화: 유저별 개별 쿼리 대신, 반 전체 체크 데이터를 가져올 수도 있으나
+        // 로직 단순화를 위해 루프 안에서 처리 (관리자 페이지이므로 퍼포먼스 허용 범위 내)
+        // 더 나은 방법: crews/{crew}/users 조회
+        const crewUsersRef = ref(db, `crews/${crew}/users`);
+        const crewUsersSnap = await get(crewUsersRef);
+        const crewUsers = crewUsersSnap.val() || {};
+
+        for (const uid of approvedUids) {
+          const uMeta = allUsers[uid] || { name: '알수없음' };
+          const uChecks = crewUsers[uid]?.checks || {};
+
+          // 해당 월 날짜만큼 체크되었는지 확인
+          const checkedCount = dates.filter(d => uChecks[d]).length;
+          const progress = Math.round((checkedCount / totalDays) * 100);
+          const isSuccess = checkedCount === totalDays;
+
+          // 상태 라벨 결정
+          let stateLabel = '실패';
+          if (isSuccess) stateLabel = '성공';
+          else {
+            // 현재 진행 중인 달이면 '도전중' 표시
+            const now = new Date();
+            const thisYM = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+            if (ym === thisYM) stateLabel = '도전중';
+          }
+
+          // 메달 결정 (성공 시)
+          let medalType = null;
+          if (isSuccess) {
+            if (crew === '고급반') medalType = 'gold';
+            else if (crew === '중급반') medalType = 'silver';
+            else medalType = 'bronze';
+          }
+
+          // 누적 메달 (프로필 기준)
+          const currentMedals = uMeta.medals || {};
+          const totalMedals = (currentMedals.gold || 0) + (currentMedals.silver || 0) + (currentMedals.bronze || 0);
+
+          liveReport.push({
+            uid,
+            name: uMeta.name || uid,
+            crew,
+            chapters: checkedCount, // 장수 대신 일수(체크수)로 표현됨에 유의, or calculate chapters precisely if strictly needed
+            progress,
+            stateLabel,
+            totalMedals,
+            medal: medalType
+          });
+        }
+      }
+
+      setReportData(liveReport);
+
     } catch (e) {
       console.error(e);
       alert('보고서를 불러오는 중 오류가 발생했습니다.');
@@ -843,63 +853,76 @@ export default function AdminPage({ user }) {
 
 
   // ✅ 연간 누적 데이터 계산 및 로드
+  // ✅ 연간 누적 데이터 계산 및 로드 (Live)
   async function handleLoadYearlyReport(targetYear) {
     const year = targetYear || selectedYearForReport;
     setYearlyLoading(true);
     try {
-      const allMonths = await getYearlyHallOfFame(year); // { "01": { gold: [...], ... }, "02": ... }
+      // ✅ [9]번 보고서: earnedMedals 이력(Source of Truth) 기반 실시간 집계
 
-      const userSummary = {}; // { name: { countInfo, bibleReads } }
+      // 1. 전체 유저 데이터 로드 (medals, earnedMedals 포함)
+      const usersRef = ref(db, 'users');
+      const usersSnap = await get(usersRef);
+      const allUsers = usersSnap.val() || {};
 
-      Object.entries(allMonths).forEach(([month, medals]) => {
-        ['gold', 'silver', 'bronze'].forEach(mKey => {
-          (medals[mKey] || []).forEach(entry => {
-            const name = entry.name;
-            const crew = entry.crew;
-            if (!userSummary[name]) {
-              userSummary[name] = {
-                name,
-                crews: {},
-                totalBible: 0,
-                // 계산용 카운트
-                cnt: { adv: 0, int: 0, nt: 0, ota: 0, otb: 0 }
-              };
-            }
+      const processedList = [];
 
-            // 반별 카운트 증가
-            userSummary[name].crews[crew] = (userSummary[name].crews[crew] || 0) + 1;
+      Object.entries(allUsers).forEach(([uid, u]) => {
+        if (!u.earnedMedals) return;
 
-            // 1독 계산용 매핑
-            if (crew === '고급반') userSummary[name].cnt.adv++;
-            if (crew === '중급반') userSummary[name].cnt.int++;
-            if (crew === '초급반') userSummary[name].cnt.nt++;
-            if (crew === '초급반(구약A)') userSummary[name].cnt.ota++;
-            if (crew === '초급반(구약B)') userSummary[name].cnt.otb++;
-          });
+        // 해당 연도의 이력만 필터링
+        const history = Object.entries(u.earnedMedals) // [ '2026-01_고급반', 'gold' ]
+          .filter(([key, val]) => key.startsWith(`${year}-`));
+
+        if (history.length === 0) return;
+
+        // 집계
+        const crews = {}; // { 고급반: 1, ... }
+        const cnt = { adv: 0, int: 0, nt: 0, ota: 0, otb: 0 };
+
+        history.forEach(([key, medal]) => {
+          const [ym, crewName] = key.split('_');
+          crews[crewName] = (crews[crewName] || 0) + 1;
+
+          if (crewName === '고급반') cnt.adv++;
+          else if (crewName === '중급반') cnt.int++;
+          else if (crewName === '초급반') cnt.nt++;
+          else if (crewName === '초급반(구약A)') cnt.ota++;
+          else if (crewName === '초급반(구약B)') cnt.otb++;
+          // 파노라마는 신약 초급 등으로 퉁치거나 별도 계산 필요시 추가. 
+          // 현재 로직상 파노라마는 초급반(nt) 카테고리에 포함되는지 확인 필요.
+          // 앞선 시뮬레이션에서는 파노라마를 nt에 포함시켰음.
+          else if (crewName && (crewName.includes('파노라마') || crewName.includes('초급'))) {
+            // 기본적으로 신약/기타로 분류
+            cnt.nt++;
+          }
         });
-      });
 
-      // 1독(Bible Reads) 최종 계산
-      const processedList = Object.values(userSummary).map(u => {
+        // 1독(Bible Reads) 계산
         let bibleCount = 0;
-        let ntPool = u.cnt.nt;
+        let ntPool = cnt.nt;
 
         // 1. 고급반은 무조건 +1독
-        bibleCount += u.cnt.adv;
+        bibleCount += cnt.adv;
 
         // 2. 중급반 + 신약초급반 세트
-        const intSets = Math.min(u.cnt.int, ntPool);
+        const intSets = Math.min(cnt.int, ntPool);
         bibleCount += intSets;
         ntPool -= intSets;
 
         // 3. 구약A + 구약B + 신약초급반 세트
-        const otSets = Math.min(u.cnt.ota, u.cnt.otb, ntPool);
+        const otSets = Math.min(cnt.ota, cnt.otb, ntPool);
         bibleCount += otSets;
 
-        return { ...u, totalBible: bibleCount };
+        processedList.push({
+          name: u.name || '이름없음',
+          crews,
+          totalBible: bibleCount
+        });
       });
 
       setYearlyData(processedList.sort((a, b) => b.totalBible - a.totalBible || a.name.localeCompare(b.name)));
+
     } catch (e) {
       console.error(e);
       alert('연간 보고서를 생성하는 중 오류가 발생했습니다.');
@@ -2298,52 +2321,6 @@ export default function AdminPage({ user }) {
 
       {activeTab === 'group4' && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
-          {/* ✅ 과거 기록 재집계 및 업데이트 전용 섹션 */}
-          <div
-            style={{
-              padding: 16,
-              borderRadius: 12,
-              background: '#FFF9DB',
-              border: '1px solid #FAB005',
-              boxShadow: '0 4px 12px rgba(0,0,0,0.05)',
-            }}
-          >
-            <h3 style={{ marginTop: 0, marginBottom: 8, color: '#E67E22', display: 'flex', alignItems: 'center', gap: 8 }}>
-              🔄 과거 기록 재집계 및 업데이트
-            </h3>
-            <p style={{ fontSize: 13, marginBottom: 15, color: '#666', lineHeight: 1.5 }}>
-              달이 지나고 뒤늦게 체크를 완료한 성도님이 계신가요? <br />
-              해당 월을 선택하고 업데이트 버튼을 누르면 <strong>보고서, 명예의 전당, 개인별 1독 기록</strong>이 현재 체크 기록을 바탕으로 다시 작성됩니다.
-            </p>
-            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10, alignItems: 'center' }}>
-              <select value={refineYear} onChange={e => setRefineYear(Number(e.target.value))} style={{ padding: '8px 12px', borderRadius: 8, border: '1px solid #FAB005' }}>
-                {[2025, 2026, 2027].map(y => <option key={y} value={y}>{y}년</option>)}
-              </select>
-              <select value={refineMonth} onChange={e => setRefineMonth(Number(e.target.value))} style={{ padding: '8px 12px', borderRadius: 8, border: '1px solid #FAB005' }}>
-                {Array.from({ length: 12 }, (_, i) => i + 1).map(m => <option key={m} value={m}>{m}월</option>)}
-              </select>
-              <button
-                onClick={handleRefineMonthlyData}
-                disabled={refineLoading}
-                style={{
-                  padding: '10px 20px',
-                  borderRadius: 10,
-                  border: 'none',
-                  background: refineLoading ? '#ccc' : '#E67E22',
-                  color: '#fff',
-                  fontWeight: 800,
-                  cursor: refineLoading ? 'not-allowed' : 'pointer',
-                  boxShadow: '0 4px 8px rgba(230, 126, 34, 0.2)'
-                }}
-              >
-                {refineLoading ? '집계 및 업데이트 중...' : '데이터 최신화 업데이트 실행'}
-              </button>
-            </div>
-            <p style={{ fontSize: 11, color: '#E67E22', marginTop: 12, fontWeight: 700 }}>
-              * 주의: 실행 시 해당 월의 기존 보고서 데이터가 현재 체크 데이터로 덮어씌워집니다.
-            </p>
-          </div>
-
           {/* [8] 월별 결과 보고서 */}
           <div
             style={{
@@ -2413,7 +2390,9 @@ export default function AdminPage({ user }) {
                             <tr key={row.uid} style={{ borderBottom: '1px solid #eee' }}>
                               <td style={{ padding: 10 }}>{row.crew}</td>
                               <td style={{ padding: 10, fontWeight: 'bold' }}>{row.name}</td>
-                              <td style={{ padding: 10, textAlign: 'center' }}>{row.chapters}장</td>
+                              <td style={{ padding: 10, textAlign: 'center' }}>
+                                {String(row.chapters).endsWith('장') ? row.chapters : `${row.chapters}일`}
+                              </td>
                               <td style={{ padding: 10, textAlign: 'center' }}>{row.progress}%</td>
                               <td style={{ padding: 10, textAlign: 'center' }}>
                                 <span style={{
@@ -2560,6 +2539,42 @@ export default function AdminPage({ user }) {
           </div>
         </div>
       )}
+      {/* 🔄 [11] 데이터 재집계 및 동기화 */}
+      <div style={{ marginTop: 40, padding: 20, background: '#F0F9FF', border: '2px solid #3B82F6', borderRadius: 12 }}>
+        <h3 style={{ color: '#1E40AF', margin: '0 0 10px 0' }}>🔄 [11] 데이터 재집계 및 동기화 (관리자 전용)</h3>
+        <p style={{ fontSize: 13, color: '#1E3A8A', lineHeight: 1.5, marginBottom: 15 }}>
+          데이터 수동 변경 후 누르면 메달, 보고서 등이 동기화됩니다.<br />
+          (모든 승인 인원의 기록을 전수 조사하여 자격에 맞춰 메달을 지급/회수하고 랭킹을 갱신합니다.)
+        </p>
+        <button
+          onClick={async () => {
+            if (!window.confirm("🔄 전체 데이터를 재집계 하시겠습니까?\n(약간의 시간이 소요될 수 있습니다.)")) return;
+            try {
+              const msg = await runMedalFixOps();
+              alert(msg);
+              // 데이터 갱신을 위해 리로드
+              handleLoadYearlyReport();
+            } catch (e) {
+              alert("동기화 실패: " + e.message);
+            }
+          }}
+          style={{
+            padding: '12px 24px',
+            background: '#2563EB',
+            color: 'white',
+            border: 'none',
+            borderRadius: 8,
+            fontWeight: 'bold',
+            cursor: 'pointer',
+            fontSize: 15,
+            display: 'flex',
+            alignItems: 'center',
+            gap: 8
+          }}
+        >
+          🔄 데이터 재집계 실행
+        </button>
+      </div>
     </div>
   );
 }

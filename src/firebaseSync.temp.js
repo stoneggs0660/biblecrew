@@ -1234,155 +1234,158 @@ export async function getYearlyHallOfFame(year) {
   return snap.val() || {};
 }
 
-// Logic copied/simplified from rankingUtils.js, bibleUtils.js, and dokUtils.js
-// Note: We need to ensure getDatabase, ref, get, update are available. They are imported at top.
 
-function getMonthDates(year, month) {
-  const lastDay = new Date(year, month, 0).getDate();
-  const dates = [];
-  for (let d = 1; d <= lastDay; d++) {
-    dates.push(`${year}-${String(month).padStart(2, '0')}-${String(d).padStart(2, '0')}`);
-  }
-  return dates;
+// Logic copied/simplified from rankingUtils.js, bibleUtils.js, and dokUtils.js
+import { getDatabase as getDatabaseFix, ref as refFix, get as getFix, update as updateFix } from "firebase/database";
+import { CREW_KEYS } from "./utils/crewConfig";
+
+const dbFix = getDatabaseFix();
+
+function getMonthDatesFix(year, month) {
+    const lastDay = new Date(year, month, 0).getDate();
+    const dates = [];
+    for (let d = 1; d <= lastDay; d++) {
+        dates.push(`${year}-${String(month).padStart(2, '0')}-${String(d).padStart(2, '0')}`);
+    }
+    return dates;
 }
 
 export async function runMedalFixOps() {
-  console.log("--- 🛠️ [클라이언트 실행] 메달/보고서 데이터 일괄 복구 및 정제(Fix) ---");
-  const db2 = getDatabase();
+    console.log("--- 🛠️ [클라이언트 실행] 메달/보고서 데이터 일괄 복구 및 정제(Fix) ---");
+    
+    const year = 2026;
+    const targetMonths = [1, 2]; // 1, 2월 대상으로 조사
+    
+    // 1. 전체 유저 목록 가져오기
+    console.log("📥 [1/4] 사용자 목록 로딩 중...");
+    const usersRef = refFix(dbFix, 'users');
+    const usersSnap = await getFix(usersRef);
+    const usersMap = usersSnap.val() || {};
+    const allUids = Object.keys(usersMap);
+    console.log(`   총 ${allUids.length}명 대상`);
 
-  const year = 2026;
-  const targetMonths = [1, 2]; // 1, 2월 대상으로 조사
+    const earnedMedalStore = {}; 
+    const medalCounts = {}; 
+    const hofMonthly = {};
 
-  // 1. 전체 유저 목록 가져오기
-  console.log("📥 [1/4] 사용자 목록 로딩 중...");
-  const usersRef = ref(db2, 'users');
-  const usersSnap = await get(usersRef);
-  const usersMap = usersSnap.val() || {};
-  const allUids = Object.keys(usersMap);
-  console.log(`   총 ${allUids.length}명 대상`);
+    function calculateDokStatus(earnedMedals) {
+        const items = Object.entries(earnedMedals || {}).map(([k, v]) => {
+            const parts = k.split('_');
+            return { crew: parts[1], medal: v, key: k };
+        });
+        let adv = 0, inter = 0, basic = {otA:0, otB:0, nt:0};
+        items.forEach(it => {
+            if (it.crew === '고급반') adv++;
+            else if (it.crew === '중급반') inter++;
+            else if (it.crew === '초급반(구약A)') basic.otA++;
+            else if (it.crew === '초급반(구약B)') basic.otB++;
+            else if (it.crew?.includes('파노라마') || it.crew === '초급반') basic.nt++;
+        });
+        let total = adv;
+        const fromInter = Math.min(inter, basic.nt);
+        total += fromInter;
+        const remainNt = basic.nt - fromInter;
+        total += Math.min(basic.otA, basic.otB, remainNt);
+        return total;
+    }
 
-  const earnedMedalStore = {};
-  const medalCounts = {};
-  const hofMonthly = {};
-
-  function calculateDokStatus(earnedMedals) {
-    const items = Object.entries(earnedMedals || {}).map(([k, v]) => {
-      const parts = k.split('_');
-      return { crew: parts[1], medal: v, key: k };
+    allUids.forEach(uid => {
+        earnedMedalStore[uid] = {};
+        medalCounts[uid] = { gold: 0, silver: 0, bronze: 0 };
     });
-    let adv = 0, inter = 0, basic = { otA: 0, otB: 0, nt: 0 };
-    items.forEach(it => {
-      if (it.crew === '고급반') adv++;
-      else if (it.crew === '중급반') inter++;
-      else if (it.crew === '초급반(구약A)') basic.otA++;
-      else if (it.crew === '초급반(구약B)') basic.otB++;
-      else if (it.crew?.includes('파노라마') || it.crew === '초급반') basic.nt++;
-    });
-    let total = adv;
-    const fromInter = Math.min(inter, basic.nt);
-    total += fromInter;
-    const remainNt = basic.nt - fromInter;
-    total += Math.min(basic.otA, basic.otB, remainNt);
-    return total;
-  }
 
-  allUids.forEach(uid => {
-    earnedMedalStore[uid] = {};
-    medalCounts[uid] = { gold: 0, silver: 0, bronze: 0 };
-  });
+    console.log("\n📥 [2/4] 진도표(checks) 전수 조사 및 메달 재판정...");
 
-  console.log("\n📥 [2/4] 진도표(checks) 전수 조사 및 메달 재판정...");
+    for (const m of targetMonths) {
+        const mm = String(m).padStart(2, '0');
+        const ymKey = `${year}-${mm}`;
+        
+        hofMonthly[ymKey] = { gold: [], silver: [], bronze: [], dokAchievers: [] };
 
-  for (const m of targetMonths) {
-    const mm = String(m).padStart(2, '0');
-    const ymKey = `${year}-${mm}`;
+        const appRef = refFix(dbFix, `approvals/${ymKey}`);
+        const appSnap = await getFix(appRef);
+        const approvals = appSnap.val() || {};
 
-    hofMonthly[ymKey] = { gold: [], silver: [], bronze: [], dokAchievers: [] };
+        for (const uid of allUids) {
+            for (const crew of CREW_KEYS) {
+                if (!approvals[crew] || !approvals[crew][uid]) continue;
 
-    const appRef = ref(db2, `approvals/${ymKey}`);
-    const appSnap = await get(appRef);
-    const approvals = appSnap.val() || {};
+                const crewCheckRef = refFix(dbFix, `crews/${crew}/users/${uid}/checks`);
+                const checkSnap = await getFix(crewCheckRef);
+                const checks = checkSnap.val() || {};
+                
+                const dates = getMonthDatesFix(year, m);
+                const isSuccess = dates.every(d => checks[d]);
+
+                if (isSuccess) {
+                    let medalType = 'bronze';
+                    if (crew === '고급반') medalType = 'gold';
+                    else if (crew === '중급반') medalType = 'silver';
+
+                    const awardKey = `${ymKey}_${crew}`;
+                    earnedMedalStore[uid][awardKey] = medalType;
+                    medalCounts[uid][medalType]++;
+
+                    const uMeta = usersMap[uid];
+                    hofMonthly[ymKey][medalType].push({
+                        name: uMeta.name || '이름없음',
+                        crew: crew
+                    });
+                }
+            }
+        }
+    }
+
+    console.log("\n💾 [3/4] DB 일괄 업데이트 실행...");
+    const updates = {};
 
     for (const uid of allUids) {
-      for (const crew of CREW_KEYS) {
-        if (!approvals[crew] || !approvals[crew][uid]) continue;
-
-        const crewCheckRef = ref(db2, `crews/${crew}/users/${uid}/checks`);
-        const checkSnap = await get(crewCheckRef);
-        const checks = checkSnap.val() || {};
-
-        const dates = getMonthDates(year, m);
-        const isSuccess = dates.every(d => checks[d]);
-
-        if (isSuccess) {
-          let medalType = 'bronze';
-          if (crew === '고급반') medalType = 'gold';
-          else if (crew === '중급반') medalType = 'silver';
-
-          const awardKey = `${ymKey}_${crew}`;
-          earnedMedalStore[uid][awardKey] = medalType;
-          medalCounts[uid][medalType]++;
-
-          const uMeta = usersMap[uid];
-          hofMonthly[ymKey][medalType].push({
-            name: uMeta.name || '이름없음',
-            crew: crew
-          });
-        }
-      }
+        const newEarned = Object.keys(earnedMedalStore[uid]).length > 0 ? earnedMedalStore[uid] : null;
+        updates[`users/${uid}/earnedMedals`] = newEarned;
+        updates[`users/${uid}/medals`] = medalCounts[uid];
     }
-  }
 
-  console.log("\n💾 [3/4] DB 일괄 업데이트 실행...");
-  const updates = {};
+    for (const m of targetMonths) {
+        const mm = String(m).padStart(2, '0');
+        const ymKey = `${year}-${mm}`;
+        const result = hofMonthly[ymKey];
 
-  for (const uid of allUids) {
-    const newEarned = Object.keys(earnedMedalStore[uid]).length > 0 ? earnedMedalStore[uid] : null;
-    updates[`users/${uid}/earnedMedals`] = newEarned;
-    updates[`users/${uid}/medals`] = medalCounts[uid];
-  }
+        updates[`hallOfFame/${year}/monthlyResults/${mm}/gold`] = result.gold;
+        updates[`hallOfFame/${year}/monthlyResults/${mm}/silver`] = result.silver;
+        updates[`hallOfFame/${year}/monthlyResults/${mm}/bronze`] = result.bronze;
+        
+        const achievers = [];
+        const candidates = new Set([
+            ...result.gold.map(x => x.name),
+            ...result.silver.map(x => x.name),
+            ...result.bronze.map(x => x.name)
+        ]);
+        
+        const nameToUid = {};
+        Object.entries(usersMap).forEach(([u, v]) => nameToUid[v.name] = u);
 
-  for (const m of targetMonths) {
-    const mm = String(m).padStart(2, '0');
-    const ymKey = `${year}-${mm}`;
-    const result = hofMonthly[ymKey];
+        candidates.forEach(name => {
+            const uid = nameToUid[name];
+            if (!uid) return;
+            
+            const currentTotalDok = calculateDokStatus(earnedMedalStore[uid]);
+            
+            const prevHistory = {};
+            Object.entries(earnedMedalStore[uid]).forEach(([k, v]) => {
+                const [kYm] = k.split('_');
+                if (kYm < ymKey) prevHistory[k] = v;
+            });
+            const prevTotalDok = calculateDokStatus(prevHistory);
 
-    updates[`hallOfFame/${year}/monthlyResults/${mm}/gold`] = result.gold;
-    updates[`hallOfFame/${year}/monthlyResults/${mm}/silver`] = result.silver;
-    updates[`hallOfFame/${year}/monthlyResults/${mm}/bronze`] = result.bronze;
+            if (currentTotalDok > prevTotalDok) {
+                achievers.push({ name: name, dokCount: currentTotalDok });
+            }
+        });
 
-    const achievers = [];
-    const candidates = new Set([
-      ...result.gold.map(x => x.name),
-      ...result.silver.map(x => x.name),
-      ...result.bronze.map(x => x.name)
-    ]);
+        updates[`hallOfFame/${year}/monthlyResults/${mm}/dokAchievers`] = achievers;
+    }
 
-    const nameToUid = {};
-    Object.entries(usersMap).forEach(([u, v]) => nameToUid[v.name] = u);
-
-    candidates.forEach(name => {
-      const uid = nameToUid[name];
-      if (!uid) return;
-
-      const currentTotalDok = calculateDokStatus(earnedMedalStore[uid]);
-
-      const prevHistory = {};
-      Object.entries(earnedMedalStore[uid]).forEach(([k, v]) => {
-        const [kYm] = k.split('_');
-        if (kYm < ymKey) prevHistory[k] = v;
-      });
-      const prevTotalDok = calculateDokStatus(prevHistory);
-
-      if (currentTotalDok > prevTotalDok) {
-        achievers.push({ name: name, dokCount: currentTotalDok });
-      }
-    });
-
-    updates[`hallOfFame/${year}/monthlyResults/${mm}/dokAchievers`] = achievers;
-  }
-
-  await update(ref(db2), updates);
-  console.log("✅ [4/4] 업데이트 완료! 모든 데이터가 정상화되었습니다.");
-  return "✅ [성공] 모든 데이터가 정상적으로 복구되었습니다.";
+    await updateFix(refFix(dbFix), updates);
+    console.log("✅ [4/4] 업데이트 완료! 모든 데이터가 정상화되었습니다.");
+    return "✅ [성공] 모든 데이터가 정상적으로 복구되었습니다.";
 }
